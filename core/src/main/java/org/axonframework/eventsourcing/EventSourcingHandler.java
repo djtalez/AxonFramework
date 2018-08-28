@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@
 package org.axonframework.eventsourcing;
 
 import org.axonframework.eventhandling.EventHandler;
-import org.axonframework.eventhandling.EventMessage;
 import org.axonframework.messaging.Message;
 import org.axonframework.messaging.MetaData;
 
@@ -39,7 +38,7 @@ import java.lang.annotation.*;
  * <li>Parameters of type {@link java.time.Instant} will resolve to the timestamp of the EventMessage. This is the
  * time at which the Event was generated.</li>
  * <li>Parameters assignable to {@link Message} will have the entire {@link
- * EventMessage} injected (if the message is assignable to that parameter). If the first
+ * org.axonframework.eventhandling.EventMessage} injected (if the message is assignable to that parameter). If the first
  * parameter is of type message, it effectively matches an Event of any type, even if generic parameters would suggest
  * otherwise. Due to type erasure, Axon cannot detect what parameter is expected. In such case, it is best to declare a
  * parameter of the payload type, followed by a parameter of type Message.</li>
@@ -68,7 +67,7 @@ import java.lang.annotation.*;
 @EventHandler
 @Documented
 @Retention(RetentionPolicy.RUNTIME)
-@Target(ElementType.METHOD)
+@Target({ElementType.METHOD, ElementType.ANNOTATION_TYPE})
 public @interface EventSourcingHandler {
 
     /**

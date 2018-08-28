@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2017. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import de.flapdoodle.embed.mongo.MongodExecutable;
 import de.flapdoodle.embed.mongo.MongodProcess;
 import org.axonframework.common.jdbc.PersistenceExceptionResolver;
 import org.axonframework.eventsourcing.eventstore.AbstractEventStorageEngine;
-import org.axonframework.eventsourcing.eventstore.BatchingEventStorageEngineTest;
 import org.axonframework.mongo.eventsourcing.eventstore.documentperevent.DocumentPerEventStorageStrategy;
 import org.axonframework.mongo.utils.MongoLauncher;
 import org.axonframework.serialization.upcasting.event.EventUpcaster;
@@ -40,8 +39,10 @@ import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
 
 import java.io.IOException;
 
+import static org.axonframework.eventsourcing.eventstore.EventStoreTestUtils.AGGREGATE;
 import static org.axonframework.eventsourcing.eventstore.EventStoreTestUtils.createEvent;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 
 /**
@@ -50,7 +51,8 @@ import static org.junit.Assert.assertEquals;
 @RunWith(SpringJUnit4ClassRunner.class)
 @ContextConfiguration(locations = {"classpath:META-INF/spring/mongo-context.xml"})
 @DirtiesContext
-public class MongoEventStorageEngineTest extends BatchingEventStorageEngineTest {
+public class MongoEventStorageEngineTest extends AbstractMongoEventStorageEngineTest {
+
     private static final Logger logger = LoggerFactory.getLogger(MongoEventStorageEngineTest.class);
 
     private static MongodExecutable mongoExe;
@@ -112,6 +114,15 @@ public class MongoEventStorageEngineTest extends BatchingEventStorageEngineTest 
         assertEquals(1, mongoTemplate.snapshotCollection().count());
     }
 
+    @Test
+    public void testFetchHighestSequenceNumber() {
+        testSubject.appendEvents(createEvent(0), createEvent(1));
+        testSubject.appendEvents(createEvent(2));
+
+        assertEquals(2, (long) testSubject.lastSequenceNumberFor(AGGREGATE).get());
+        assertFalse(testSubject.lastSequenceNumberFor("notexist").isPresent());
+    }
+
     @Override
     protected AbstractEventStorageEngine createEngine(EventUpcaster upcasterChain) {
         return new MongoEventStorageEngine(new XStreamSerializer(), upcasterChain, mongoTemplate,
@@ -120,8 +131,9 @@ public class MongoEventStorageEngineTest extends BatchingEventStorageEngineTest 
 
     @Override
     protected AbstractEventStorageEngine createEngine(PersistenceExceptionResolver persistenceExceptionResolver) {
-        return new MongoEventStorageEngine(new XStreamSerializer(), NoOpEventUpcaster.INSTANCE,
-                                           persistenceExceptionResolver, 100, mongoTemplate,
+        XStreamSerializer serializer = new XStreamSerializer();
+        return new MongoEventStorageEngine(serializer, NoOpEventUpcaster.INSTANCE,
+                                           persistenceExceptionResolver, serializer, 100, mongoTemplate,
                                            new DocumentPerEventStorageStrategy());
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,13 +29,12 @@ import org.axonframework.commandhandling.gateway.DefaultCommandGateway;
 import org.axonframework.messaging.MessageHandler;
 import org.axonframework.serialization.SerializedObject;
 import org.axonframework.serialization.xml.XStreamSerializer;
-import org.hamcrest.Description;
-import org.hamcrest.TypeSafeMatcher;
 import org.jgroups.JChannel;
 import org.jgroups.stack.GossipRouter;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.mockito.*;
 
 import java.nio.charset.Charset;
 import java.util.Arrays;
@@ -48,6 +47,7 @@ import static org.mockito.Mockito.*;
 
 /**
  * @author Allard Buijze
+ * @author Nakul Mishra
  */
 public class JgroupsConnectorTest_Gossip {
 
@@ -77,7 +77,7 @@ public class JgroupsConnectorTest_Gossip {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         if (gossipRouter != null) {
             gossipRouter.stop();
         }
@@ -99,12 +99,12 @@ public class JgroupsConnectorTest_Gossip {
         gossipRouter.start();
 
         // now, they should detect eachother and start syncing their state
-        int t = 0;
-        while (!connector1.getConsistentHash().getMembers().equals(connector2.getConsistentHash().getMembers())) {
+        long deadline = System.currentTimeMillis() + 60000;
+        while (!connector1.getConsistentHash().equals(connector2.getConsistentHash())) {
             // don't have a member for String yet, which means we must wait a little longer
-            if (t++ > 600) {
-                fail("Connectors did not manage to synchronize consistent hash ring within " + 60
-                             + " seconds...");
+            if (System.currentTimeMillis() > deadline) {
+                assertEquals("Connectors did not manage to synchronize consistent hash ring within 60 seconds...",
+                             connector1.getConsistentHash(), connector2.getConsistentHash());
             }
             Thread.sleep(100);
         }
@@ -115,33 +115,24 @@ public class JgroupsConnectorTest_Gossip {
         gossipRouter.start();
 
         final AtomicInteger counter2 = new AtomicInteger(0);
-        connector1.updateMembership(20, AcceptAll.INSTANCE);
-        connector1.connect();
-        connector2.updateMembership(20, AcceptAll.INSTANCE);
-        connector2.connect();
-        assertTrue("Failed to connect", connector1.awaitJoined(5, TimeUnit.SECONDS));
-        assertTrue("Failed to connect", connector2.awaitJoined(5, TimeUnit.SECONDS));
 
         DistributedCommandBus bus1 = new DistributedCommandBus(connector1, connector1);
-        //bus1.subscribe(String.class.getName(), new CountingCommandHandler(counter2));
+        bus1.updateLoadFactor(20);
+        connector1.connect();
+        assertTrue("Failed to connect", connector1.awaitJoined(5, TimeUnit.SECONDS));
+
         DistributedCommandBus bus2 = new DistributedCommandBus(connector2, connector2);
         bus2.subscribe(String.class.getName(), new CountingCommandHandler(counter2));
+        bus2.updateLoadFactor(20);
+        connector2.connect();
+        assertTrue("Failed to connect", connector2.awaitJoined(5, TimeUnit.SECONDS));
 
         // now, they should detect eachother and start syncing their state
-        waitForConnectorSync(10);
+        waitForConnectorSync();
 
         CommandGateway gateway1 = new DefaultCommandGateway(bus1);
 
-        doThrow(new RuntimeException("Mock")).when(serializer).deserialize(argThat(new TypeSafeMatcher<SerializedObject<byte[]>>() {
-            @Override
-            protected boolean matchesSafely(SerializedObject<byte[]> item) {
-                return Arrays.equals("<string>Try this!</string>".getBytes(Charset.forName("UTF-8")), item.getData());
-            }
-
-            @Override
-            public void describeTo(Description description) {
-            }
-        }));
+        doThrow(new RuntimeException("Mock")).when(serializer).deserialize(argThat((ArgumentMatcher<SerializedObject<byte[]>>) x -> Arrays.equals("<string>Try this!</string>".getBytes(Charset.forName("UTF-8")), x.getData())));
 
         try {
             gateway1.sendAndWait("Try this!");
@@ -151,14 +142,14 @@ public class JgroupsConnectorTest_Gossip {
         }
     }
 
-    private void waitForConnectorSync(int timeoutInSeconds) throws InterruptedException {
-        int t = 0;
+    private void waitForConnectorSync() throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 10000;
         while ((connector1.getConsistentHash().getMembers().isEmpty())
                 || !connector1.getConsistentHash().equals(connector2.getConsistentHash())) {
             // don't have a member for String yet, which means we must wait a little longer
-            if (t++ > timeoutInSeconds * 10) {
-                fail("Connectors did not manage to synchronize consistent hash ring within " + timeoutInSeconds
-                             + " seconds...");
+            if (System.currentTimeMillis() > deadline) {
+                assertEquals("Connectors did not manage to synchronize consistent hash ring within 10 seconds...",
+                             connector1.getConsistentHash(), connector2.getConsistentHash());
             }
             Thread.sleep(100);
         }
@@ -177,7 +168,7 @@ public class JgroupsConnectorTest_Gossip {
         }
 
         @Override
-        public Object handle(CommandMessage<?> message) throws Exception {
+        public Object handle(CommandMessage<?> message) {
             counter.incrementAndGet();
             return "The Reply!";
         }

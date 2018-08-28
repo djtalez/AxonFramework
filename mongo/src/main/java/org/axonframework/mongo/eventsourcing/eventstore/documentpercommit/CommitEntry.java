@@ -26,6 +26,8 @@ import org.bson.conversions.Bson;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.axonframework.common.DateTimeUtils.formatInstant;
+
 /**
  * Mongo event storage entry containing an array of {@link EventEntry event entries} that are part of the same
  * UnitOfWork commit.
@@ -41,6 +43,7 @@ public class CommitEntry {
     private final String firstTimestamp;
     private final String lastTimestamp;
     private final EventEntry[] eventEntries;
+    private final String lastEventIdentifier;
 
     /**
      * Constructor used to create a new event entry to store in Mongo.
@@ -52,10 +55,11 @@ public class CommitEntry {
         DomainEventMessage firstEvent = events.get(0);
         DomainEventMessage lastEvent = events.get(events.size() - 1);
         firstSequenceNumber = firstEvent.getSequenceNumber();
-        firstTimestamp = firstEvent.getTimestamp().toString();
-        lastTimestamp = lastEvent.getTimestamp().toString();
+        firstTimestamp = formatInstant(firstEvent.getTimestamp());
+        lastTimestamp = formatInstant(lastEvent.getTimestamp());
         lastSequenceNumber = lastEvent.getSequenceNumber();
         aggregateIdentifier = lastEvent.getAggregateIdentifier();
+        lastEventIdentifier = lastEvent.getIdentifier();
         aggregateType = lastEvent.getType();
         eventEntries = new EventEntry[events.size()];
         for (int i = 0, eventsLength = events.size(); i < eventsLength; i++) {
@@ -83,6 +87,7 @@ public class CommitEntry {
         this.aggregateType = (String) dbObject.get(eventConfiguration.typeProperty());
         List<Document> entries = (List<Document>) dbObject.get(commitConfiguration.eventsProperty());
         eventEntries = new EventEntry[entries.size()];
+        this.lastEventIdentifier = (String) dbObject.get(eventConfiguration.eventIdentifierProperty());
         for (int i = 0, entriesSize = entries.size(); i < entriesSize; i++) {
             eventEntries[i] = new EventEntry(entries.get(i), eventConfiguration);
         }
@@ -112,6 +117,7 @@ public class CommitEntry {
         }
         return new Document(eventConfiguration.aggregateIdentifierProperty(), aggregateIdentifier)
                 .append(eventConfiguration.sequenceNumberProperty(), lastSequenceNumber)
+                .append(eventConfiguration.eventIdentifierProperty(), lastEventIdentifier)
                 .append(commitConfiguration.lastSequenceNumberProperty(), lastSequenceNumber)
                 .append(commitConfiguration.firstSequenceNumberProperty(), firstSequenceNumber)
                 .append(eventConfiguration.timestampProperty(), firstTimestamp)

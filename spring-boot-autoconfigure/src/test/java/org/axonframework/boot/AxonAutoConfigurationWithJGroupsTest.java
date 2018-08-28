@@ -17,9 +17,11 @@ package org.axonframework.boot;
 
 import org.axonframework.commandhandling.CommandBus;
 import org.axonframework.commandhandling.SimpleCommandBus;
+import org.axonframework.commandhandling.distributed.AnnotationRoutingStrategy;
 import org.axonframework.commandhandling.distributed.CommandBusConnector;
 import org.axonframework.commandhandling.distributed.CommandRouter;
 import org.axonframework.commandhandling.distributed.DistributedCommandBus;
+import org.axonframework.commandhandling.distributed.RoutingStrategy;
 import org.axonframework.commandhandling.gateway.AbstractCommandGateway;
 import org.axonframework.commandhandling.gateway.CommandGateway;
 import org.axonframework.commandhandling.gateway.DefaultCommandGateway;
@@ -34,7 +36,7 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.autoconfigure.jmx.JmxAutoConfiguration;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
-import org.springframework.boot.autoconfigure.web.WebClientAutoConfiguration;
+import org.springframework.boot.autoconfigure.web.reactive.function.client.WebClientAutoConfiguration;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.TestPropertySource;
@@ -60,14 +62,20 @@ public class AxonAutoConfigurationWithJGroupsTest {
     private CommandBus commandBus;
 
     @Autowired
+    private RoutingStrategy routingStrategy;
+
+    @Autowired
     private CommandRouter commandRouter;
 
     @Autowired
     private CommandBusConnector commandBusConnector;
 
     @Test
-    public void testContextInitialization() throws Exception {
+    public void testContextInitialization() {
         assertNotNull(applicationContext);
+
+        assertNotNull(applicationContext.getBean(RoutingStrategy.class));
+        assertEquals(AnnotationRoutingStrategy.class, routingStrategy.getClass());
 
         assertNotNull(commandRouter);
         assertEquals(JGroupsConnector.class, commandRouter.getClass());

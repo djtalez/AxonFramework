@@ -1,9 +1,12 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -26,8 +29,11 @@ import javax.persistence.LockModeType;
 import java.lang.management.ManagementFactory;
 import java.time.Duration;
 import java.time.temporal.TemporalAmount;
+import java.util.Collections;
+import java.util.List;
 
 import static java.lang.String.format;
+import static org.axonframework.common.DateTimeUtils.formatInstant;
 
 /**
  * Implementation of a token store that uses JPA to save and load tokens. This implementation uses {@link TokenEntry}
@@ -72,6 +78,24 @@ public class JpaTokenStore implements TokenStore {
     }
 
     @Override
+    public void initializeTokenSegments(String processorName, int segmentCount) throws UnableToClaimTokenException {
+        initializeTokenSegments(processorName, segmentCount, null);
+    }
+
+    @Override
+    public void initializeTokenSegments(String processorName, int segmentCount, TrackingToken initialToken) throws UnableToClaimTokenException {
+        EntityManager entityManager = entityManagerProvider.getEntityManager();
+        if (fetchSegments(processorName).length > 0) {
+            throw new UnableToClaimTokenException("Could not initialize segments. Some segments were already present.");
+        }
+        for (int segment = 0; segment < segmentCount; segment++) {
+            TokenEntry token = new TokenEntry(processorName, segment, initialToken, serializer);
+            entityManager.persist(token);
+        }
+        entityManager.flush();
+    }
+
+    @Override
     public void storeToken(TrackingToken token, String processorName, int segment) {
         EntityManager entityManager = entityManagerProvider.getEntityManager();
         TokenEntry tokenEntry = loadOrCreateToken(processorName, segment, entityManager);
@@ -84,10 +108,10 @@ public class JpaTokenStore implements TokenStore {
         int updates = entityManager.createQuery("UPDATE TokenEntry te SET te.owner = null " +
                                                         "WHERE te.owner = :owner AND te.processorName = :processorName " +
                                                         "AND te.segment = :segment")
-                .setParameter("processorName", processorName)
-                .setParameter("segment", segment)
-                .setParameter("owner", nodeId)
-                .executeUpdate();
+                                   .setParameter("processorName", processorName)
+                                   .setParameter("segment", segment)
+                                   .setParameter("owner", nodeId)
+                                   .executeUpdate();
         if (updates == 0) {
             logger.warn("Releasing claim of token {}/{} failed. It was not owned by {}", processorName, segment,
                         nodeId);
@@ -104,17 +128,32 @@ public class JpaTokenStore implements TokenStore {
     public void extendClaim(String processorName, int segment) throws UnableToClaimTokenException {
         EntityManager entityManager = entityManagerProvider.getEntityManager();
         int updates = entityManager.createQuery("UPDATE TokenEntry te SET te.timestamp = :timestamp " +
-                                                        "WHERE te.processorName = :processorName AND te.segment = :segment")
-                .setParameter("processorName", processorName)
-                .setParameter("segment", segment)
-                .setParameter("timestamp", TokenEntry.clock.instant().toString())
-                .executeUpdate();
+                                                        "WHERE te.processorName = :processorName " +
+                                                        "AND te.segment = :segment " +
+                                                        "AND te.owner = :owner")
+                                   .setParameter("processorName", processorName)
+                                   .setParameter("segment", segment)
+                                   .setParameter("owner", nodeId)
+                                   .setParameter("timestamp", formatInstant(TokenEntry.clock.instant()))
+                                   .executeUpdate();
 
         if (updates == 0) {
             throw new UnableToClaimTokenException("Unable to extend the claim on token for processor '" +
                                                           processorName + "[" + segment + "]'. It is either claimed " +
                                                           "by another process, or there is no such token.");
         }
+    }
+
+    @Override
+    public int[] fetchSegments(String processorName) {
+
+        EntityManager entityManager = entityManagerProvider.getEntityManager();
+        final List<Integer> resultList = entityManager.createQuery("SELECT te.segment FROM TokenEntry te " +
+                                                                           "WHERE te.processorName = :processorName ORDER BY te.segment ASC",
+                                                                   Integer.class)
+                                                      .setParameter("processorName", processorName)
+                                                      .getResultList();
+        return resultList.stream().mapToInt(i -> i).toArray();
     }
 
     /**
@@ -130,7 +169,8 @@ public class JpaTokenStore implements TokenStore {
      */
     protected TokenEntry loadOrCreateToken(String processorName, int segment, EntityManager entityManager) {
         TokenEntry token = entityManager
-                .find(TokenEntry.class, new TokenEntry.PK(processorName, segment), LockModeType.PESSIMISTIC_WRITE);
+                .find(TokenEntry.class, new TokenEntry.PK(processorName, segment), LockModeType.PESSIMISTIC_WRITE,
+                      Collections.singletonMap("javax.persistence.query.timeout", 1));
 
         if (token == null) {
             token = new TokenEntry(processorName, segment, null, serializer);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012. Axon Framework
+ * Copyright (c) 2010-2017. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package org.axonframework.serialization.xml;
 import org.axonframework.eventsourcing.StubDomainEvent;
 import org.axonframework.serialization.Revision;
 import org.axonframework.serialization.SerializedObject;
+import org.axonframework.serialization.SimpleSerializedObject;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -83,6 +84,15 @@ public class XStreamSerializerTest {
     }
 
     @Test
+    public void testDeserializeNullValue() {
+        SerializedObject<byte[]> serializedNull = testSubject.serialize(null, byte[].class);
+        assertEquals("empty", serializedNull.getType().getName());
+        SimpleSerializedObject<byte[]> serializedNullString = new SimpleSerializedObject<>(serializedNull.getData(), byte[].class, testSubject.typeForClass(String.class));
+        assertNull(testSubject.deserialize(serializedNull));
+        assertNull(testSubject.deserialize(serializedNullString));
+    }
+
+    @Test
     public void testAlias() throws UnsupportedEncodingException {
         testSubject.addAlias("stub", StubDomainEvent.class);
 
@@ -107,7 +117,7 @@ public class XStreamSerializerTest {
     }
 
     @Test
-    public void testRevisionNumber() throws UnsupportedEncodingException {
+    public void testRevisionNumber() {
         SerializedObject<byte[]> serialized = testSubject.serialize(new RevisionSpecifiedEvent(), byte[].class);
         assertNotNull(serialized);
         assertEquals("2", serialized.getType().getRevision());
@@ -115,7 +125,7 @@ public class XStreamSerializerTest {
     }
 
     @Test
-    public void testSerializedTypeUsesClassAlias() throws UnsupportedEncodingException {
+    public void testSerializedTypeUsesClassAlias() {
         testSubject.addAlias("rse", RevisionSpecifiedEvent.class);
         SerializedObject<byte[]> serialized = testSubject.serialize(new RevisionSpecifiedEvent(), byte[].class);
         assertNotNull(serialized);
@@ -132,6 +142,13 @@ public class XStreamSerializerTest {
         SerializedObject<byte[]> serialized = testSubject.serialize(new TestEvent(SPECIAL__CHAR__STRING), byte[].class);
         TestEvent deserialized = testSubject.deserialize(serialized);
         assertArrayEquals(SPECIAL__CHAR__STRING.getBytes(), deserialized.getName().getBytes());
+    }
+
+    @Test
+    public void testSerializeNullValue() {
+        SerializedObject<byte[]> serialized = testSubject.serialize(null, byte[].class);
+        String deserialized = testSubject.deserialize(serialized);
+        assertNull(deserialized);
     }
 
     /**
@@ -188,11 +205,7 @@ public class XStreamSerializerTest {
             if (name != null ? !name.equals(testEvent.name) : testEvent.name != null) {
                 return false;
             }
-            if (period != null ? !period.equals(testEvent.period) : testEvent.period != null) {
-                return false;
-            }
-
-            return true;
+            return period != null ? period.equals(testEvent.period) : testEvent.period == null;
         }
 
         @Override

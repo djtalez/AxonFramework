@@ -18,6 +18,7 @@ package org.axonframework.eventsourcing.eventstore;
 
 import org.axonframework.common.MockException;
 import org.axonframework.eventhandling.EventMessage;
+import org.axonframework.eventhandling.GenericTrackedEventMessage;
 import org.axonframework.eventhandling.TrackedEventMessage;
 import org.axonframework.eventsourcing.DomainEventMessage;
 import org.axonframework.eventsourcing.eventstore.inmemory.InMemoryEventStorageEngine;
@@ -29,11 +30,15 @@ import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.stream.Stream;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.stream.Collectors.toList;
@@ -205,6 +210,27 @@ public class EmbeddedEventStoreTest {
         assertEquals(109, eventMessages.get(eventMessages.size() - 1).getSequenceNumber());
     }
 
+    /* Reproduces issue reported in https://github.com/AxonFramework/AxonFramework/issues/485 */
+    @Test
+    public void testStreamEventsShouldNotReturnDuplicateTokens() throws InterruptedException {
+        newTestSubject(0, 1000, 1000);
+        Stream mockStream = mock(Stream.class);
+        Iterator mockIterator = mock(Iterator.class);
+        when(mockStream.iterator()).thenReturn(mockIterator);
+        when(storageEngine.readEvents(any(TrackingToken.class), eq(false)))
+                .thenReturn(mockStream);
+        when(mockIterator.hasNext()).thenAnswer(new SynchronizedBooleanAnswer(false))
+                                    .thenAnswer(new SynchronizedBooleanAnswer(true));
+        when(mockIterator.next()).thenReturn(new GenericTrackedEventMessage<>(new GlobalSequenceTrackingToken(1), createEvent()));
+        TrackingEventStream stream = testSubject.openStream(null);
+        assertFalse(stream.hasNextAvailable());
+        testSubject.publish(createEvent());
+        // give some time consumer to consume the event
+        Thread.sleep(200);
+        // if the stream correctly updates the token internally, it should not find events anymore
+        assertFalse(stream.hasNextAvailable());
+    }
+
     @Test
     public void testLoadWithFailingSnapshot() {
         testSubject.publish(createEvents(110));
@@ -221,12 +247,12 @@ public class EmbeddedEventStoreTest {
         List<DomainEventMessage<?>> events = createEvents(10);
         testSubject.publish(events.subList(0, 2));
         DefaultUnitOfWork.startAndGet(null)
-                .execute(() -> {
-                    Assert.assertEquals(2, testSubject.readEvents(AGGREGATE).asStream().count());
+                         .execute(() -> {
+                             Assert.assertEquals(2, testSubject.readEvents(AGGREGATE).asStream().count());
 
-                    testSubject.publish(events.subList(2, events.size()));
-                    Assert.assertEquals(10, testSubject.readEvents(AGGREGATE).asStream().count());
-                });
+                             testSubject.publish(events.subList(2, events.size()));
+                             Assert.assertEquals(10, testSubject.readEvents(AGGREGATE).asStream().count());
+                         });
     }
 
     @Test
@@ -234,12 +260,12 @@ public class EmbeddedEventStoreTest {
         List<DomainEventMessage<?>> events = createEvents(10);
         testSubject.publish(events.subList(0, 2));
         DefaultUnitOfWork.startAndGet(null)
-                .execute(() -> {
-                    Assert.assertEquals(2, testSubject.readEvents(AGGREGATE).asStream().count());
+                         .execute(() -> {
+                             Assert.assertEquals(2, testSubject.readEvents(AGGREGATE).asStream().count());
 
-                    testSubject.publish(events.subList(2, events.size()));
-                    Assert.assertEquals(8, testSubject.readEvents(AGGREGATE, 2).asStream().count());
-                });
+                             testSubject.publish(events.subList(2, events.size()));
+                             Assert.assertEquals(8, testSubject.readEvents(AGGREGATE, 2).asStream().count());
+                         });
     }
 
     @Test
@@ -259,5 +285,19 @@ public class EmbeddedEventStoreTest {
         unitOfWork.rollback();
 
         Assert.assertEquals(2, testSubject.readEvents(AGGREGATE).asStream().count());
+    }
+
+    private static class SynchronizedBooleanAnswer implements Answer<Boolean> {
+
+        private final boolean answer;
+
+        private SynchronizedBooleanAnswer(boolean answer) {
+            this.answer = answer;
+        }
+
+        @Override
+        public synchronized Boolean answer(InvocationOnMock invocation) {
+            return answer;
+        }
     }
 }

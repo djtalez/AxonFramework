@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2017. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.thoughtworks.xstream.mapper.CannotResolveClassException;
 import com.thoughtworks.xstream.mapper.Mapper;
 import org.axonframework.commandhandling.GenericCommandMessage;
 import org.axonframework.common.Assert;
+import org.axonframework.common.ObjectUtils;
 import org.axonframework.eventhandling.GenericEventMessage;
 import org.axonframework.eventhandling.saga.AnnotatedSaga;
 import org.axonframework.eventhandling.saga.AssociationValue;
@@ -162,7 +163,7 @@ public abstract class AbstractXStreamSerializer implements Serializer {
     @Override
     public <T> SerializedObject<T> serialize(Object object, Class<T> expectedType) {
         T result = doSerialize(object, expectedType, xStream);
-        return new SimpleSerializedObject<>(result, expectedType, typeForClass(object.getClass()));
+        return new SimpleSerializedObject<>(result, expectedType, typeForClass(ObjectUtils.nullSafeTypeOf(object)));
     }
 
     /**
@@ -221,6 +222,9 @@ public abstract class AbstractXStreamSerializer implements Serializer {
 
     @Override
     public SerializedType typeForClass(Class type) {
+        if (type == null || Void.TYPE.equals(type) || Void.class.equals(type)) {
+            return SimpleSerializedType.emptyType();
+        }
         return new SimpleSerializedType(typeIdentifierOf(type), revisionOf(type));
     }
 

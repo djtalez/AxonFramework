@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -34,8 +35,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.temporal.TemporalAmount;
+import java.util.List;
 
 import static java.lang.String.format;
+import static org.axonframework.common.DateTimeUtils.formatInstant;
 import static org.axonframework.common.jdbc.JdbcUtils.*;
 
 /**
@@ -106,6 +109,32 @@ public class JdbcTokenStore implements TokenStore {
     }
 
     @Override
+    public void initializeTokenSegments(String processorName, int segmentCount) throws UnableToClaimTokenException {
+        initializeTokenSegments(processorName, segmentCount, null);
+    }
+
+    @Override
+    public void initializeTokenSegments(String processorName, int segmentCount, TrackingToken initialToken) throws UnableToClaimTokenException {
+        Connection connection = getConnection();
+        try {
+            executeQuery(connection,
+                         c -> selectForUpdate(c, processorName, 0),
+                         resultSet -> {
+                             for (int segment = 0; segment < segmentCount; segment++) {
+                                 insertTokenEntry(resultSet, initialToken, processorName, segment);
+                             }
+                             if (!connection.getAutoCommit()) {
+                                 connection.commit();
+                             }
+                             return null;
+                         },
+                         e -> new UnableToClaimTokenException("Could not initialize segments. Some segments were already present.", e));
+        } finally {
+            closeQuietly(connection);
+        }
+    }
+
+    @Override
     public void storeToken(TrackingToken token, String processorName, int segment) throws UnableToClaimTokenException {
         Connection connection = getConnection();
         try {
@@ -165,6 +194,36 @@ public class JdbcTokenStore implements TokenStore {
         } finally {
             closeQuietly(connection);
         }
+    }
+
+    @Override
+    public int[] fetchSegments(String processorName) {
+        Connection connection = getConnection();
+        try {
+            List<Integer> integers = executeQuery(connection, c -> selectForSegments(c, processorName),
+                                                  listResults(rs -> rs.getInt(schema.segmentColumn())), e -> new JdbcException(
+                            format("Could not load segments for processor [%s]", processorName), e));
+            return integers.stream().mapToInt(i -> i).toArray();
+        } finally {
+            closeQuietly(connection);
+        }
+    }
+
+    /**
+     * Returns a {@link PreparedStatement} to select all segments ids for a given processorName from the underlying storage.
+     *
+     * @param connection    the connection to the underlying database
+     * @param processorName the name of the processor to fetch the segments for
+     * @return a {@link PreparedStatement} that will fetch segments when executed
+     * @throws SQLException when an exception occurs while creating the prepared statement
+     */
+    protected PreparedStatement selectForSegments(Connection connection, String processorName) throws SQLException {
+        final String sql = "SELECT " + schema.segmentColumn() + " FROM " +
+                schema.tokenTable() + " WHERE " + schema.processorNameColumn() + " = ? ORDER BY " + schema.segmentColumn() + " ASC";
+        PreparedStatement preparedStatement =
+                connection.prepareStatement(sql, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+        preparedStatement.setString(1, processorName);
+        return preparedStatement;
     }
 
     /**
@@ -321,7 +380,7 @@ public class JdbcTokenStore implements TokenStore {
                         " = ? AND " + schema.ownerColum() + " = ?";
         PreparedStatement preparedStatement = connection.prepareStatement(sql);
         preparedStatement.setString(1, null);
-        preparedStatement.setString(2, AbstractTokenEntry.clock.instant().toString());
+        preparedStatement.setString(2, formatInstant(AbstractTokenEntry.clock.instant()));
         preparedStatement.setString(3, processorName);
         preparedStatement.setInt(4, segment);
         preparedStatement.setString(5, nodeId);

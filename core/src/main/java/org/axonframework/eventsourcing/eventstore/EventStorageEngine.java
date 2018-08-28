@@ -1,9 +1,12 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,6 +20,7 @@ import org.axonframework.eventhandling.EventMessage;
 import org.axonframework.eventhandling.TrackedEventMessage;
 import org.axonframework.eventsourcing.DomainEventMessage;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -116,4 +120,50 @@ public interface EventStorageEngine {
      * @return An optional with a snapshot of the aggregate
      */
     Optional<DomainEventMessage<?>> readSnapshot(String aggregateIdentifier);
+
+    /**
+     * Returns the last known sequence number for the given {@code aggregateIdentifier}.
+     * <p>
+     * While it's recommended to use the sequence numbers from the {@link DomainEventStream}, there are cases where
+     * knowing the sequence number is required, without having read the actual events. In such case, this method is a
+     * viable alternative.
+     *
+     * @param aggregateIdentifier The identifier to find the last sequence number for
+     * @return an optional with the highest sequence number, or an empty optional if the aggregate identifier wasn't
+     * found
+     */
+    default Optional<Long> lastSequenceNumberFor(String aggregateIdentifier) {
+        return readEvents(aggregateIdentifier).asStream().map(DomainEventMessage::getSequenceNumber).max(Long::compareTo);
+    }
+
+    /**
+     * Creates a token that is at the tail of an event stream - that tracks events from the beginning of time.
+     *
+     * @return a tracking token at the tail of an event stream, if event stream is empty {@code null} is returned
+     */
+    default TrackingToken createTailToken() {
+        return null;
+    }
+
+    /**
+     * Creates a token that is at the head of an event stream - that tracks all new events.
+     *
+     * @return a tracking token at the head of an event stream, if event stream is empty {@code null} is returned
+     */
+    default TrackingToken createHeadToken() {
+        throw new UnsupportedOperationException("Creation of Head Token not supported by this EventStorageEngine");
+    }
+
+    /**
+     * Creates a token that tracks all events after given {@code dateTime}. If there is an event exactly at the given
+     * {@code dateTime}, it will be tracked too.
+     *
+     * @param dateTime The date and time for determining criteria how the tracking token should be created. A tracking
+     *                 token should point to very first event before this date and time.
+     * @return a tracking token at the given {@code dateTime}, if there aren't events matching this criteria {@code
+     * null} is returned
+     */
+    default TrackingToken createTokenAt(Instant dateTime) {
+        throw new UnsupportedOperationException("Creation of Time based Token not supported by this EventStorageEngine");
+    }
 }

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  ~ Copyright (c) 2010-2017. Axon Framework
+  ~ Copyright (c) 2010-2018. Axon Framework
+  ~
   ~ Licensed under the Apache License, Version 2.0 (the "License");
   ~ you may not use this file except in compliance with the License.
   ~ You may obtain a copy of the License at
@@ -18,20 +19,20 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starters</artifactId>
-        <version>1.5.3.RELEASE</version>
+        <version>1.5.7.RELEASE</version>
         <relativePath />
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>org.axonframework</groupId>
     <artifactId>axon-spring-boot-starter-jgroups</artifactId>
-    <version>3.1-SNAPSHOT</version>
+    <version>3.4-SNAPSHOT</version>
 
     <name>Spring Boot Starter module for Axon with JGroups Distributed Command Bus</name>
 
     <organization>
-        <name>Trifork B.V.</name>
-        <url>http://www.axonframework.org</url>
+        <name>AxonIQ B.V.</name>
+        <url>https://axoniq.io</url>
     </organization>
 
     <licenses>
@@ -41,9 +42,13 @@
         </license>
     </licenses>
     <issueManagement>
-        <system>YouTrack</system>
+        <system>GitHub</system>
         <url>http://issues.axonframework.org</url>
     </issueManagement>
+
+    <properties>
+        <jgroups.version>4.0.6.Final</jgroups.version>
+    </properties>
 
     <dependencies>
         <dependency>
@@ -59,12 +64,11 @@
         <dependency>
             <groupId>org.jgroups</groupId>
             <artifactId>jgroups</artifactId>
-            <version>3.6.10.Final</version>
+            <version>${jgroups.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
-            <version>1.5.3.RELEASE</version>
         </dependency>
     </dependencies>
 

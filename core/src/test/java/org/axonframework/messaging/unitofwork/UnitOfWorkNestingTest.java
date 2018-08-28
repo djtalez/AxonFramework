@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2010-2012. Axon Framework
- *
+ * Copyright (c) 2010-2017. Axon Framework
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -27,8 +26,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.*;
 
 /**
  * @author Allard Buijze
@@ -37,6 +35,7 @@ public class UnitOfWorkNestingTest {
 
     private List<PhaseTransition> phaseTransitions = new ArrayList<>();
     private UnitOfWork<?> outer;
+    private UnitOfWork<?> middle;
     private UnitOfWork<?> inner;
 
     @SuppressWarnings({"unchecked", "deprecation"})
@@ -53,6 +52,12 @@ public class UnitOfWorkNestingTest {
                 return "outer";
             }
         };
+        middle = new DefaultUnitOfWork(new GenericEventMessage<Object>("Input middle")) {
+            @Override
+            public String toString() {
+                return "middle";
+            }
+        };
         inner = new DefaultUnitOfWork(new GenericEventMessage<>("Input 2")) {
             @Override
             public String toString() {
@@ -60,6 +65,7 @@ public class UnitOfWorkNestingTest {
             }
         };
         registerListeners(outer);
+        registerListeners(middle);
         registerListeners(inner);
     }
 
@@ -85,6 +91,7 @@ public class UnitOfWorkNestingTest {
         outer.onCommit(u -> {
             throw new MockException();
         });
+        outer.onCommit(u -> phaseTransitions.add(new PhaseTransition(u, UnitOfWork.Phase.COMMIT, "x")));
         outer.start();
         try {
             outer.commit();
@@ -96,7 +103,7 @@ public class UnitOfWorkNestingTest {
         assertEquals(Arrays.asList(new PhaseTransition(outer, UnitOfWork.Phase.PREPARE_COMMIT),
                                    new PhaseTransition(inner, UnitOfWork.Phase.PREPARE_COMMIT),
                                    new PhaseTransition(inner, UnitOfWork.Phase.COMMIT),
-                                   new PhaseTransition(outer, UnitOfWork.Phase.COMMIT),
+                                   new PhaseTransition(outer, UnitOfWork.Phase.COMMIT, "x"),
                                    new PhaseTransition(inner, UnitOfWork.Phase.ROLLBACK),
                                    new PhaseTransition(outer, UnitOfWork.Phase.ROLLBACK),
                                    new PhaseTransition(inner, UnitOfWork.Phase.CLEANUP),
@@ -172,12 +179,43 @@ public class UnitOfWorkNestingTest {
     }
 
     @Test
+    public void testRollbackOfMiddleUnitOfWorkRollsBackInner() {
+        outer.onPrepareCommit(u -> {
+            middle.start();
+            inner.start();
+            inner.commit();
+            middle.rollback();
+        });
+        outer.start();
+        outer.commit();
+
+        assertTrue("The middle UnitOfWork hasn't been correctly marked as rolled back", middle.isRolledBack());
+        assertTrue("The inner UnitOfWork hasn't been correctly marked as rolled back", inner.isRolledBack());
+        assertFalse("The out UnitOfWork has been incorrectly marked as rolled back", outer.isRolledBack());
+        assertFalse("The UnitOfWork hasn't been correctly cleared", CurrentUnitOfWork.isStarted());
+        assertEquals(Arrays.asList(new PhaseTransition(outer, UnitOfWork.Phase.PREPARE_COMMIT),
+                                   new PhaseTransition(inner, UnitOfWork.Phase.PREPARE_COMMIT),
+                                   new PhaseTransition(inner, UnitOfWork.Phase.COMMIT),
+                                   // important that the inner has been given a rollback signal
+                                   new PhaseTransition(inner, UnitOfWork.Phase.ROLLBACK),
+                                   new PhaseTransition(middle, UnitOfWork.Phase.ROLLBACK),
+                                   new PhaseTransition(outer, UnitOfWork.Phase.COMMIT),
+                                   new PhaseTransition(outer, UnitOfWork.Phase.AFTER_COMMIT),
+                                   new PhaseTransition(inner, UnitOfWork.Phase.CLEANUP),
+                                   new PhaseTransition(middle, UnitOfWork.Phase.CLEANUP),
+                                   new PhaseTransition(outer, UnitOfWork.Phase.CLEANUP)
+        ), phaseTransitions);
+    }
+
+    @Test
     public void testInnerUnitCommitFailureDoesNotAffectOuterCommit() {
         outer.onPrepareCommit(u -> {
             inner.start();
             inner.onCommit(uow -> {
                 throw new MockException();
             });
+            // commits are invoked in reverse order, so we expect to see this one, but not the previously registered handler
+            inner.onCommit(uow -> phaseTransitions.add(new PhaseTransition(inner, UnitOfWork.Phase.COMMIT, "x")));
             try {
                 inner.commit();
             } catch (MockException e) {
@@ -190,7 +228,7 @@ public class UnitOfWorkNestingTest {
         assertFalse("The UnitOfWork hasn't been correctly cleared", CurrentUnitOfWork.isStarted());
         assertEquals(Arrays.asList(new PhaseTransition(outer, UnitOfWork.Phase.PREPARE_COMMIT),
                                    new PhaseTransition(inner, UnitOfWork.Phase.PREPARE_COMMIT),
-                                   new PhaseTransition(inner, UnitOfWork.Phase.COMMIT),
+                                   new PhaseTransition(inner, UnitOfWork.Phase.COMMIT, "x"),
                                    new PhaseTransition(inner, UnitOfWork.Phase.ROLLBACK),
                                    new PhaseTransition(outer, UnitOfWork.Phase.COMMIT),
                                    new PhaseTransition(outer, UnitOfWork.Phase.AFTER_COMMIT),
@@ -203,10 +241,16 @@ public class UnitOfWorkNestingTest {
 
         private final UnitOfWork.Phase phase;
         private final UnitOfWork<?> unitOfWork;
+        private final String id;
 
         public PhaseTransition(UnitOfWork<?> unitOfWork, UnitOfWork.Phase phase) {
+            this(unitOfWork, phase, "");
+        }
+
+        public PhaseTransition(UnitOfWork<?> unitOfWork, UnitOfWork.Phase phase, String id) {
             this.unitOfWork = unitOfWork;
             this.phase = phase;
+            this.id = id.length() > 0 ? " " + id : id;
         }
 
         @Override
@@ -219,17 +263,18 @@ public class UnitOfWorkNestingTest {
             }
             PhaseTransition that = (PhaseTransition) o;
             return Objects.equals(phase, that.phase) &&
-                    Objects.equals(unitOfWork, that.unitOfWork);
+                    Objects.equals(unitOfWork, that.unitOfWork) &&
+                    Objects.equals(id, that.id);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(phase, unitOfWork);
+            return Objects.hash(phase, unitOfWork, id);
         }
 
         @Override
         public String toString() {
-            return unitOfWork + " " + phase;
+            return unitOfWork + " " + phase + id;
         }
     }
 }

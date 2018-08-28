@@ -20,7 +20,9 @@ import org.axonframework.commandhandling.AnnotationCommandHandlerAdapter;
 import org.axonframework.commandhandling.CommandHandler;
 import org.axonframework.commandhandling.CommandMessage;
 import org.axonframework.commandhandling.SupportedCommandNamesAware;
+import org.axonframework.common.annotation.AnnotationUtils;
 import org.axonframework.messaging.MessageHandler;
+import org.axonframework.messaging.annotation.HandlerDefinition;
 import org.axonframework.messaging.annotation.ParameterResolverFactory;
 import org.axonframework.spring.config.AbstractAnnotationHandlerBeanPostProcessor;
 import org.springframework.util.ReflectionUtils;
@@ -50,21 +52,22 @@ public class AnnotationCommandHandlerBeanPostProcessor
 
     @Override
     protected AnnotationCommandHandlerAdapter initializeAdapterFor(Object bean,
-                                                                   ParameterResolverFactory parameterResolverFactory) {
-        return new AnnotationCommandHandlerAdapter(bean, parameterResolverFactory);
+                                                                   ParameterResolverFactory parameterResolverFactory,
+                                                                   HandlerDefinition handlerDefinition) {
+        return new AnnotationCommandHandlerAdapter(bean, parameterResolverFactory, handlerDefinition);
     }
 
     private boolean hasCommandHandlerMethod(Class<?> beanClass) {
         final AtomicBoolean result = new AtomicBoolean(false);
-        ReflectionUtils.doWithMethods(beanClass, new HasEventHandlerAnnotationMethodCallback(result));
+        ReflectionUtils.doWithMethods(beanClass, new HasCommandHandlerAnnotationMethodCallback(result));
         return result.get();
     }
 
-    private static final class HasEventHandlerAnnotationMethodCallback implements ReflectionUtils.MethodCallback {
+    private static final class HasCommandHandlerAnnotationMethodCallback implements ReflectionUtils.MethodCallback {
 
         private final AtomicBoolean result;
 
-        private HasEventHandlerAnnotationMethodCallback(AtomicBoolean result) {
+        private HasCommandHandlerAnnotationMethodCallback(AtomicBoolean result) {
             this.result = result;
         }
 
@@ -72,8 +75,8 @@ public class AnnotationCommandHandlerBeanPostProcessor
          * {@inheritDoc}
          */
         @Override
-        public void doWith(Method method) throws IllegalArgumentException, IllegalAccessException {
-            if (method.isAnnotationPresent(CommandHandler.class)) {
+        public void doWith(Method method) throws IllegalArgumentException {
+            if (AnnotationUtils.findAnnotationAttributes(method, CommandHandler.class).isPresent()) {
                 result.set(true);
             }
         }

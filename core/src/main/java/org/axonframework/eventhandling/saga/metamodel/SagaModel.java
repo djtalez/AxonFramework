@@ -18,7 +18,7 @@ package org.axonframework.eventhandling.saga.metamodel;
 
 import org.axonframework.eventhandling.EventMessage;
 import org.axonframework.eventhandling.saga.AssociationValue;
-import org.axonframework.eventhandling.saga.SagaMethodMessageHandlingMember;
+import org.axonframework.messaging.annotation.MessageHandlingMember;
 
 import java.util.List;
 import java.util.Optional;
@@ -41,12 +41,22 @@ public interface SagaModel<T> {
     Optional<AssociationValue> resolveAssociation(EventMessage<?> eventMessage);
 
     /**
-     * Returns a List of {@link SagaMethodMessageHandlingMember event handlers} that can handle the given event.
+     * Returns a {@link List} of {@link MessageHandlingMember} that can handle the given event.
      *
-     * @param event The event to process
-     * @return event message handlers for this event
+     * @param event The {@link EventMessage} to be handled
+     * @return event message handlers for the given {@code event}
      */
-    List<SagaMethodMessageHandlingMember<T>> findHandlerMethods(EventMessage<?> event);
+    List<MessageHandlingMember<? super T>> findHandlerMethods(EventMessage<?> event);
+
+    /**
+     * Indicates whether the Saga described by this model has a handler for the given {@code eventMessage}
+     *
+     * @param eventMessage The message to check the availability of a handler for
+     * @return {@code true} if there the Saga has a handler for this message, otherwise {@code false}
+     */
+    default boolean hasHandlerMethod(EventMessage<?> eventMessage) {
+        return !findHandlerMethods(eventMessage).isEmpty();
+    }
 
     /**
      * Returns the factory that created this model.

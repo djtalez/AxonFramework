@@ -36,7 +36,7 @@ public class SimpleResourceInjectorTest {
     private SimpleResourceInjector testSubject;
 
     @Test
-    public void testInjectFieldResource() throws Exception {
+    public void testInjectFieldResource() {
         SomeFieldResource expectedFieldResource = new SomeFieldResource();
         testSubject = new SimpleResourceInjector(expectedFieldResource);
         final StubSaga saga = new StubSaga();
@@ -58,7 +58,7 @@ public class SimpleResourceInjectorTest {
     }
 
     @Test
-    public void testInjectFieldAndMethodResources() throws Exception {
+    public void testInjectFieldAndMethodResources() {
         final SomeFieldResource expectedFieldResource = new SomeFieldResource();
         final SomeMethodResource expectedMethodResource = new SomeMethodResource();
         testSubject = new SimpleResourceInjector(expectedFieldResource, expectedMethodResource);
@@ -109,8 +109,12 @@ public class SimpleResourceInjectorTest {
         }
 
         @Override
-        public boolean handle(EventMessage event) {
+        public boolean canHandle(EventMessage<?> event) {
             return true;
+        }
+
+        @Override
+        public void handle(EventMessage event) {
         }
 
         @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ import java.util.Objects;
 import java.util.Spliterators;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -44,15 +45,19 @@ public abstract class BatchingEventStorageEngine extends AbstractEventStorageEng
     private final int batchSize;
 
     /**
-     * Initializes an EventStorageEngine with given {@code serializer}, {@code upcasterChain} and {@code
-     * persistenceExceptionResolver}.
+     * Initializes an EventStorageEngine with given {@code serializer}, {@code upcasterChain}, {@code
+     * persistenceExceptionResolver}, {@code eventSerializer} and {@code batchSize}.
      *
-     * @param serializer                   Used to serialize and deserialize event payload and metadata. If {@code null}
-     *                                     an {@link XStreamSerializer} is used.
+     * @param snapshotSerializer           Used to serialize and deserialize snapshots. If {@code null}
+     *                                     a {@link XStreamSerializer} is instantiated by the
+     *                                     {@link org.axonframework.eventsourcing.eventstore.AbstractEventStorageEngine}.
      * @param upcasterChain                Allows older revisions of serialized objects to be deserialized. If {@code
      *                                     null} a {@link NoOpEventUpcaster} is used.
      * @param persistenceExceptionResolver Detects concurrency exceptions from the backing database. If {@code null}
      *                                     persistence exceptions are not explicitly resolved.
+     * @param eventSerializer              Used to serialize and deserialize event payload and metadata.
+     *                                     If {@code null} a {@link XStreamSerializer} is instantiated by the
+     *                                     {@link org.axonframework.eventsourcing.eventstore.AbstractEventStorageEngine}.
      * @param batchSize                    The number of events that should be read at each database access. When more
      *                                     than this number of events must be read to rebuild an aggregate's state, the
      *                                     events are read in batches of this size. If {@code null} a batch size of 100
@@ -60,9 +65,39 @@ public abstract class BatchingEventStorageEngine extends AbstractEventStorageEng
      *                                     and batch size such that a single batch will generally retrieve all events
      *                                     required to rebuild an aggregate's state.
      */
-    public BatchingEventStorageEngine(Serializer serializer, EventUpcaster upcasterChain,
-                                      PersistenceExceptionResolver persistenceExceptionResolver, Integer batchSize) {
-        super(serializer, upcasterChain, persistenceExceptionResolver);
+    public BatchingEventStorageEngine(Serializer snapshotSerializer, EventUpcaster upcasterChain,
+                                      PersistenceExceptionResolver persistenceExceptionResolver,
+                                      Serializer eventSerializer, Integer batchSize) {
+        this(snapshotSerializer, upcasterChain, persistenceExceptionResolver, eventSerializer, null, batchSize);
+    }
+
+    /**
+     * Initializes an EventStorageEngine with given {@code serializer}, {@code upcasterChain}, {@code
+     * persistenceExceptionResolver}, {@code eventSerializer} and {@code batchSize}.
+     *
+     * @param snapshotSerializer           Used to serialize and deserialize snapshots. If {@code null}
+     *                                     a {@link XStreamSerializer} is instantiated by the
+     *                                     {@link org.axonframework.eventsourcing.eventstore.AbstractEventStorageEngine}.
+     * @param upcasterChain                Allows older revisions of serialized objects to be deserialized. If {@code
+     *                                     null} a {@link NoOpEventUpcaster} is used.
+     * @param persistenceExceptionResolver Detects concurrency exceptions from the backing database. If {@code null}
+     *                                     persistence exceptions are not explicitly resolved.
+     * @param eventSerializer              Used to serialize and deserialize event payload and metadata.
+     *                                     If {@code null} a {@link XStreamSerializer} is instantiated by the
+     *                                     {@link org.axonframework.eventsourcing.eventstore.AbstractEventStorageEngine}.
+     * @param snapshotFilter               Filter describing which snapshots should be considered. If {@code null}, all
+     *                                     snapshots will be considered viable.
+     * @param batchSize                    The number of events that should be read at each database access. When more
+     *                                     than this number of events must be read to rebuild an aggregate's state, the
+     *                                     events are read in batches of this size. If {@code null} a batch size of 100
+     *                                     is used. Tip: if you use a snapshotter, make sure to choose snapshot trigger
+     *                                     and batch size such that a single batch will generally retrieve all events
+     *                                     required to rebuild an aggregate's state.
+     */
+    public BatchingEventStorageEngine(Serializer snapshotSerializer, EventUpcaster upcasterChain,
+                                      PersistenceExceptionResolver persistenceExceptionResolver,
+                                      Serializer eventSerializer, Predicate<? super DomainEventData<?>> snapshotFilter, Integer batchSize) {
+        super(snapshotSerializer, upcasterChain, persistenceExceptionResolver, eventSerializer, snapshotFilter);
         this.batchSize = getOrDefault(batchSize, DEFAULT_BATCH_SIZE);
     }
 

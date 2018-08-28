@@ -1,9 +1,12 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,6 +18,7 @@ package org.axonframework.eventhandling.saga;
 
 import org.axonframework.eventhandling.EventMessage;
 import org.axonframework.eventhandling.GenericEventMessage;
+import org.axonframework.eventhandling.Segment;
 import org.axonframework.eventhandling.saga.repository.AnnotatedSagaRepository;
 import org.axonframework.eventhandling.saga.repository.SagaStore;
 import org.axonframework.eventhandling.saga.repository.inmemory.InMemorySagaStore;
@@ -47,7 +51,7 @@ public class AnnotatedSagaManagerTest {
     private InMemorySagaStore sagaStore;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         sagaStore = new InMemorySagaStore();
         sagaRepository = spy(new AnnotatedSagaRepository<>(MyTestSaga.class, sagaStore));
         manager = new AnnotatedSagaManager<>(MyTestSaga.class, sagaRepository, MyTestSaga::new);
@@ -102,8 +106,8 @@ public class AnnotatedSagaManagerTest {
 
         handle(new GenericEventMessage<>(new MiddleEvent("12")));
         handle(new GenericEventMessage<>(new MiddleEvent("23"), singletonMap("catA", "value")));
-        assertEquals(0, (int) repositoryContents("12").iterator().next().getSpecificHandlerInvocations());
-        assertEquals(1, (int) repositoryContents("23").iterator().next().getSpecificHandlerInvocations());
+        assertEquals(0, repositoryContents("12").iterator().next().getSpecificHandlerInvocations());
+        assertEquals(1, repositoryContents("23").iterator().next().getSpecificHandlerInvocations());
     }
 
     @Test
@@ -152,7 +156,10 @@ public class AnnotatedSagaManagerTest {
     }
     
     private void handle(EventMessage<?> event) throws Exception {
-        DefaultUnitOfWork.startAndGet(event).executeWithResult(() -> manager.handle(event));
+        DefaultUnitOfWork.startAndGet(event).executeWithResult(() -> {
+            manager.handle(event, Segment.ROOT_SEGMENT);
+            return null;
+        });
     }
 
     private Collection<MyTestSaga> repositoryContents(String lookupValue) {
@@ -169,9 +176,8 @@ public class AnnotatedSagaManagerTest {
         private List<Object> capturedEvents = new LinkedList<>();
         private int specificHandlerInvocations = 0;
 
-        @StartSaga
-        @SagaEventHandler(associationProperty = "myIdentifier")
-        public void handleSomeEvent(StartingEvent event) throws InterruptedException {
+        @CustomStartingSagaEventHandler
+        public void handleSomeEvent(StartingEvent event) {
             capturedEvents.add(event);
         }
 
@@ -189,8 +195,7 @@ public class AnnotatedSagaManagerTest {
             capturedEvents.add(event);
         }
 
-        @EndSaga
-        @SagaEventHandler(associationProperty = "myIdentifier")
+        @CustomEndingSagaEventHandler
         public void handleSomeEvent(EndingEvent event) {
             capturedEvents.add(event);
         }

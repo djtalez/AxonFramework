@@ -1,9 +1,12 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,6 +28,7 @@ import org.axonframework.serialization.xml.XStreamSerializer;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import static java.lang.String.format;
@@ -40,6 +44,8 @@ public abstract class AbstractEventStorageEngine implements EventStorageEngine {
     private final Serializer serializer;
     private final EventUpcaster upcasterChain;
     private final PersistenceExceptionResolver persistenceExceptionResolver;
+    private final Serializer eventSerializer;
+    private final Predicate<? super DomainEventData<?>> snapshotFilter;
 
     /**
      * Initializes an EventStorageEngine with given {@code serializer}, {@code upcasterChain} and {@code
@@ -51,29 +57,78 @@ public abstract class AbstractEventStorageEngine implements EventStorageEngine {
      *                                     null} a {@link NoOpEventUpcaster} is used.
      * @param persistenceExceptionResolver Detects concurrency exceptions from the backing database. If {@code null}
      *                                     persistence exceptions are not explicitly resolved.
+     * @deprecated The constructor which supplies an additional {@link org.axonframework.serialization.Serializer} for
+     * events should be used.
      */
+    @Deprecated
     protected AbstractEventStorageEngine(Serializer serializer, EventUpcaster upcasterChain,
                                          PersistenceExceptionResolver persistenceExceptionResolver) {
-        this.serializer = getOrDefault(serializer, XStreamSerializer::new);
+        this(serializer, upcasterChain, persistenceExceptionResolver, serializer);
+    }
+
+    /**
+     * Initializes an EventStorageEngine with given {@code serializer}, {@code upcasterChain} and {@code
+     * persistenceExceptionResolver}.
+     *
+     * @param snapshotSerializer           Used to serialize and deserialize snapshots. If {@code null}
+     *                                     a new {@link XStreamSerializer} is used.
+     * @param upcasterChain                Allows older revisions of serialized objects to be deserialized. If {@code
+     *                                     null} a {@link NoOpEventUpcaster} is used.
+     * @param persistenceExceptionResolver Detects concurrency exceptions from the backing database. If {@code null}
+     *                                     persistence exceptions are not explicitly resolved.
+     * @param eventSerializer              Used to serialize and deserialize event payload and metadata. If {@code null}
+     *                                     a new {@link XStreamSerializer} is used.
+     */
+    protected AbstractEventStorageEngine(Serializer snapshotSerializer,
+                                         EventUpcaster upcasterChain,
+                                         PersistenceExceptionResolver persistenceExceptionResolver,
+                                         Serializer eventSerializer) {
+        this(snapshotSerializer, upcasterChain, persistenceExceptionResolver, eventSerializer, null);
+    }
+
+    /**
+     * Initializes an EventStorageEngine with given {@code serializer}, {@code upcasterChain} and {@code
+     * persistenceExceptionResolver}. The given {@code snapshotFilter} is used to define which snapshots are accepted
+     * for this version of the application.
+     *
+     * @param snapshotSerializer           Used to serialize and deserialize snapshots. If {@code null}
+     *                                     a new {@link XStreamSerializer} is used.
+     * @param upcasterChain                Allows older revisions of serialized objects to be deserialized. If {@code
+     *                                     null} a {@link NoOpEventUpcaster} is used.
+     * @param persistenceExceptionResolver Detects concurrency exceptions from the backing database. If {@code null}
+     *                                     persistence exceptions are not explicitly resolved.
+     * @param eventSerializer              Used to serialize and deserialize event payload and metadata. If {@code null}
+     *                                     a new {@link XStreamSerializer} is used.
+     * @param snapshotFilter               Decides whether to use a snapshot or not. If {@code null}, every snapshot is
+     *                                     accepted as viable.
+     */
+    protected AbstractEventStorageEngine(Serializer snapshotSerializer,
+                                         EventUpcaster upcasterChain,
+                                         PersistenceExceptionResolver persistenceExceptionResolver,
+                                         Serializer eventSerializer,
+                                         Predicate<? super DomainEventData<?>> snapshotFilter) {
+        this.serializer = getOrDefault(snapshotSerializer, XStreamSerializer::new);
         this.upcasterChain = getOrDefault(upcasterChain, () -> NoOpEventUpcaster.INSTANCE);
         this.persistenceExceptionResolver = persistenceExceptionResolver;
+        this.eventSerializer = getOrDefault(eventSerializer, XStreamSerializer::new);
+        this.snapshotFilter = getOrDefault(snapshotFilter, i -> true);
     }
 
     @Override
     public Stream<? extends TrackedEventMessage<?>> readEvents(TrackingToken trackingToken, boolean mayBlock) {
         Stream<? extends TrackedEventData<?>> input = readEventData(trackingToken, mayBlock);
-        return EventUtils.upcastAndDeserializeTrackedEvents(input, serializer, upcasterChain, true);
+        return EventUtils.upcastAndDeserializeTrackedEvents(input, eventSerializer, upcasterChain, true);
     }
 
     @Override
     public DomainEventStream readEvents(String aggregateIdentifier, long firstSequenceNumber) {
         Stream<? extends DomainEventData<?>> input = readEventData(aggregateIdentifier, firstSequenceNumber);
-        return EventUtils.upcastAndDeserializeDomainEvents(input, serializer, upcasterChain, false);
+        return EventUtils.upcastAndDeserializeDomainEvents(input, eventSerializer, upcasterChain, false);
     }
 
     @Override
     public Optional<DomainEventMessage<?>> readSnapshot(String aggregateIdentifier) {
-        return readSnapshotData(aggregateIdentifier).map(entry -> {
+        return readSnapshotData(aggregateIdentifier).filter(snapshotFilter).map(entry -> {
             DomainEventStream stream =
                     EventUtils.upcastAndDeserializeDomainEvents(Stream.of(entry), serializer, upcasterChain, false);
             return stream.hasNext() ? stream.next() : null;
@@ -82,7 +137,7 @@ public abstract class AbstractEventStorageEngine implements EventStorageEngine {
 
     @Override
     public void appendEvents(List<? extends EventMessage<?>> events) {
-        appendEvents(events, serializer);
+        appendEvents(events, eventSerializer);
     }
 
     @Override
@@ -170,11 +225,20 @@ public abstract class AbstractEventStorageEngine implements EventStorageEngine {
     protected abstract Optional<? extends DomainEventData<?>> readSnapshotData(String aggregateIdentifier);
 
     /**
-     * Get the serializer used by this storage engine when storing and retrieving events.
+     * Get the serializer used by this storage engine when storing and retrieving snapshots.
      *
      * @return the serializer used by this storage
      */
     public Serializer getSerializer() {
         return serializer;
+    }
+
+    /**
+     * Get the serializer used by this storage engine when storing and retrieving events.
+     *
+     * @return the serializer used by this storage
+     */
+    public Serializer getEventSerializer() {
+        return eventSerializer;
     }
 }

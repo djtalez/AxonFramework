@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2010-2017. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,7 +16,7 @@
 
 package org.axonframework.boot.autoconfig;
 
-import org.axonframework.boot.RegisterDefaultEntities;
+import org.axonframework.boot.util.RegisterDefaultEntities;
 import org.axonframework.common.jdbc.PersistenceExceptionResolver;
 import org.axonframework.common.jpa.ContainerManagedEntityManagerProvider;
 import org.axonframework.common.jpa.EntityManagerProvider;
@@ -25,20 +26,17 @@ import org.axonframework.eventhandling.saga.repository.jpa.JpaSagaStore;
 import org.axonframework.eventhandling.tokenstore.TokenStore;
 import org.axonframework.eventhandling.tokenstore.jpa.JpaTokenStore;
 import org.axonframework.eventsourcing.eventstore.EventStorageEngine;
-import org.axonframework.eventsourcing.eventstore.jdbc.JdbcSQLErrorCodesResolver;
+import org.axonframework.eventsourcing.eventstore.EventStore;
 import org.axonframework.eventsourcing.eventstore.jpa.JpaEventStorageEngine;
-import org.axonframework.eventsourcing.eventstore.jpa.SQLErrorCodesResolver;
 import org.axonframework.serialization.Serializer;
-import org.axonframework.serialization.upcasting.event.EventUpcaster;
 import org.axonframework.spring.config.AxonConfiguration;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import javax.persistence.EntityManagerFactory;
-import javax.sql.DataSource;
-import java.sql.SQLException;
 
 @ConditionalOnBean(EntityManagerFactory.class)
 @RegisterDefaultEntities(packages = {"org.axonframework.eventsourcing.eventstore.jpa",
@@ -47,29 +45,17 @@ import java.sql.SQLException;
 @Configuration
 public class JpaAutoConfiguration {
 
-    @ConditionalOnMissingBean
+    @ConditionalOnMissingBean({EventStorageEngine.class, EventStore.class})
     @Bean
     public EventStorageEngine eventStorageEngine(Serializer serializer,
                                                  PersistenceExceptionResolver persistenceExceptionResolver,
+                                                 @Qualifier("eventSerializer") Serializer eventSerializer,
                                                  AxonConfiguration configuration,
                                                  EntityManagerProvider entityManagerProvider,
                                                  TransactionManager transactionManager) {
-        return new JpaEventStorageEngine(serializer, configuration.getComponent(EventUpcaster.class),
-                                         persistenceExceptionResolver, null, entityManagerProvider,
+        return new JpaEventStorageEngine(serializer, configuration.upcasterChain(),
+                                         persistenceExceptionResolver, eventSerializer, null, entityManagerProvider,
                                          transactionManager, null, null, true);
-    }
-
-    @ConditionalOnMissingBean
-    @ConditionalOnBean(DataSource.class)
-    @Bean
-    public PersistenceExceptionResolver dataSourcePersistenceExceptionResolver(DataSource dataSource) throws SQLException {
-        return new SQLErrorCodesResolver(dataSource);
-    }
-
-    @ConditionalOnMissingBean({DataSource.class, PersistenceExceptionResolver.class})
-    @Bean
-    public PersistenceExceptionResolver jdbcSQLErrorCodesResolver() {
-        return new JdbcSQLErrorCodesResolver();
     }
 
     @ConditionalOnMissingBean

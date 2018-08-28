@@ -1,9 +1,12 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2017. Axon Framework
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,9 +20,16 @@ import org.axonframework.eventhandling.EventMessage;
 import org.axonframework.eventhandling.TrackedEventMessage;
 import org.axonframework.eventsourcing.DomainEventMessage;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Spliterator;
+import java.util.Spliterators;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 /**
  * EventStorageEngine implementation that combines the streams of two event storage engines. The first event storage
@@ -35,6 +45,7 @@ import java.util.stream.Stream;
  * take care of this themselves.
  *
  * @author Rene de Waele
+ * @author Allard Buijze
  */
 public class SequenceEventStorageEngine implements EventStorageEngine {
 
@@ -66,19 +77,145 @@ public class SequenceEventStorageEngine implements EventStorageEngine {
 
     @Override
     public Stream<? extends TrackedEventMessage<?>> readEvents(TrackingToken trackingToken, boolean mayBlock) {
-        return Stream.concat(historicStorage.readEvents(trackingToken, mayBlock),
-                             activeStorage.readEvents(trackingToken, mayBlock));
+        Spliterator<? extends TrackedEventMessage<?>> historicSpliterator = historicStorage.readEvents(trackingToken, mayBlock).spliterator();
+        Spliterator<? extends TrackedEventMessage<?>> merged = new ConcatenatingSpliterator(
+                historicSpliterator, mayBlock,
+                token -> activeStorage.readEvents(token, mayBlock).spliterator());
+        return StreamSupport.stream(merged, false);
     }
 
     @Override
     public DomainEventStream readEvents(String aggregateIdentifier, long firstSequenceNumber) {
-        return DomainEventStream.concat(historicStorage.readEvents(aggregateIdentifier, firstSequenceNumber),
-                                        activeStorage.readEvents(aggregateIdentifier, firstSequenceNumber));
+        DomainEventStream historic = historicStorage.readEvents(aggregateIdentifier, firstSequenceNumber);
+        return new ConcatenatingDomainEventStream(historic, aggregateIdentifier,
+                                                  (id, seq) -> activeStorage.readEvents(aggregateIdentifier, seq));
     }
 
     @Override
     public Optional<DomainEventMessage<?>> readSnapshot(String aggregateIdentifier) {
         return Optional.ofNullable(activeStorage.readSnapshot(aggregateIdentifier).orElseGet(
                 () -> historicStorage.readSnapshot(aggregateIdentifier).orElse(null)));
+    }
+
+    @Override
+    public Optional<Long> lastSequenceNumberFor(String aggregateIdentifier) {
+        Optional<Long> result = activeStorage.lastSequenceNumberFor(aggregateIdentifier);
+        if (result.isPresent()) {
+            return result;
+        }
+        return historicStorage.lastSequenceNumberFor(aggregateIdentifier);
+    }
+
+    @Override
+    public TrackingToken createTailToken() {
+        return historicStorage.createTailToken();
+    }
+
+    @Override
+    public TrackingToken createHeadToken() {
+        return activeStorage.createHeadToken();
+    }
+
+    @Override
+    public TrackingToken createTokenAt(Instant dateTime) {
+        TrackingToken tokenFromActiveStorage = activeStorage.createTokenAt(dateTime);
+        if (tokenFromActiveStorage == null) {
+            return historicStorage.createTokenAt(dateTime);
+        }
+        return tokenFromActiveStorage;
+    }
+
+    private class ConcatenatingSpliterator extends Spliterators.AbstractSpliterator<TrackedEventMessage<?>> {
+
+        private final Spliterator<? extends TrackedEventMessage<?>> historicSpliterator;
+        private final boolean mayBlock;
+        private Spliterator<? extends TrackedEventMessage<?>> active;
+        private TrackingToken lastToken;
+        private final Function<TrackingToken, Spliterator<? extends TrackedEventMessage<?>>> nextProvider;
+
+        public ConcatenatingSpliterator(Spliterator<? extends TrackedEventMessage<?>> historicSpliterator, boolean mayBlock,
+                                        Function<TrackingToken, Spliterator<? extends TrackedEventMessage<?>>> nextProvider) {
+            super(Long.MAX_VALUE, Spliterator.ORDERED);
+            this.historicSpliterator = historicSpliterator;
+            this.mayBlock = mayBlock;
+            this.nextProvider = nextProvider;
+        }
+
+        @Override
+        public boolean tryAdvance(Consumer<? super TrackedEventMessage<?>> action) {
+            if (active == null && historicSpliterator.tryAdvance((Consumer<TrackedEventMessage<?>>) message -> {
+                lastToken = message.trackingToken();
+                action.accept(message);
+            })) {
+                return true;
+            } else if (active == null) {
+                active = nextProvider.apply(lastToken);
+            }
+            return active.tryAdvance(action);
+        }
+    }
+
+    private class ConcatenatingDomainEventStream implements DomainEventStream {
+
+        private final DomainEventStream historic;
+        private final String aggregateIdentifier;
+        private DomainEventStream actual;
+        private final BiFunction<String, Long, DomainEventStream> domainEventStream;
+
+        public ConcatenatingDomainEventStream(DomainEventStream historic, String aggregateIdentifier, BiFunction<String, Long, DomainEventStream> domainEventStream) {
+            this.historic = historic;
+            this.aggregateIdentifier = aggregateIdentifier;
+            this.domainEventStream = domainEventStream;
+        }
+
+        @Override
+        public boolean hasNext() {
+            initActiveIfRequired();
+            if (actual == null) {
+                return historic.hasNext();
+            }
+            return actual.hasNext();
+        }
+
+        private void initActiveIfRequired() {
+            if (actual == null && !historic.hasNext()) {
+                actual = domainEventStream.apply(aggregateIdentifier, nextSequenceNumber());
+            }
+        }
+
+        private long nextSequenceNumber() {
+            Long lastSequenceNumber = historic.getLastSequenceNumber();
+            return lastSequenceNumber == null ? 0 : lastSequenceNumber + 1;
+        }
+
+        @Override
+        public DomainEventMessage<?> next() {
+            initActiveIfRequired();
+            if (actual == null) {
+                return historic.next();
+            } else {
+                return actual.next();
+            }
+        }
+
+        @Override
+        public DomainEventMessage<?> peek() {
+            initActiveIfRequired();
+            if (actual == null) {
+                return historic.peek();
+            } else {
+                return actual.peek();
+            }
+        }
+
+        @Override
+        public Long getLastSequenceNumber() {
+            initActiveIfRequired();
+            if (actual == null) {
+                return historic.getLastSequenceNumber();
+            } else {
+                return actual.getLastSequenceNumber();
+            }
+        }
     }
 }

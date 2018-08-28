@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,8 @@ import org.axonframework.messaging.Message;
 
 import java.lang.reflect.Executable;
 import java.lang.reflect.Parameter;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * Factory for the default parameter resolvers. This factory is capable for providing parameter resolvers for Message,
@@ -30,7 +32,7 @@ import java.lang.reflect.Parameter;
  * @author Allard Buijze
  * @since 2.0
  */
-@Priority(Priority.FIRST)
+@Priority(Priority.LOW)
 public class DefaultParameterResolverFactory implements ParameterResolverFactory {
 
     @Override
@@ -40,41 +42,49 @@ public class DefaultParameterResolverFactory implements ParameterResolverFactory
         if (Message.class.isAssignableFrom(parameterType)) {
             return new MessageParameterResolver(parameterType);
         }
-        MetaDataValue
-                metaDataValueAnnotation = AnnotationUtils.findAnnotation(parameters[parameterIndex], MetaDataValue.class);
-        if (metaDataValueAnnotation != null) {
-            return new AnnotatedMetaDataParameterResolver(metaDataValueAnnotation, parameterType);
+        Optional<Map<String, Object>>
+                metaDataValueAnnotation = AnnotationUtils.findAnnotationAttributes(parameters[parameterIndex], MetaDataValue.class);
+        if (metaDataValueAnnotation.isPresent()) {
+            return new AnnotatedMetaDataParameterResolver(metaDataValueAnnotation.get(), parameterType);
         }
         if (org.axonframework.messaging.MetaData.class.isAssignableFrom(parameterType)) {
             return MetaDataParameterResolver.INSTANCE;
         }
         if (parameterIndex == 0) {
-            return new PayloadParameterResolver(parameterType);
+            Class<?> payloadType = (Class<?>) AnnotationUtils.findAnnotationAttributes(executable, MessageHandler.class)
+                                                             .map(attr -> attr.get("payloadType"))
+                                                             .orElse(Object.class);
+            if (payloadType.isAssignableFrom(parameterType)) {
+                return new PayloadParameterResolver(parameterType);
+            }
         }
         return null;
     }
 
     private static class AnnotatedMetaDataParameterResolver implements ParameterResolver<Object> {
 
-        private final MetaDataValue metaDataValue;
+        private static final String REQUIRED_PROPERTY = "required";
+        private static final String META_DATA_VALUE_PROPERTY = "metaDataValue";
+
+        private final Map<String, Object> metaDataValue;
         private final Class parameterType;
 
-        public AnnotatedMetaDataParameterResolver(MetaDataValue metaDataValue, Class parameterType) {
+        public AnnotatedMetaDataParameterResolver(Map<String, Object> metaDataValue, Class parameterType) {
             this.metaDataValue = metaDataValue;
             this.parameterType = parameterType;
         }
 
         @Override
         public Object resolveParameterValue(Message<?> message) {
-            return message.getMetaData().get(metaDataValue.value());
+            return message.getMetaData().get(metaDataValue.get(META_DATA_VALUE_PROPERTY).toString());
         }
 
         @Override
         public boolean matches(Message<?> message) {
-            return !(parameterType.isPrimitive() || metaDataValue.required())
+            return !(parameterType.isPrimitive() || (boolean) metaDataValue.get(REQUIRED_PROPERTY))
                     || (
-                    message.getMetaData().containsKey(metaDataValue.value())
-                            && parameterType.isInstance(message.getMetaData().get(metaDataValue.value()))
+                    message.getMetaData().containsKey(metaDataValue.get(META_DATA_VALUE_PROPERTY).toString())
+                            && parameterType.isInstance(message.getMetaData().get(metaDataValue.get(META_DATA_VALUE_PROPERTY).toString()))
             );
         }
     }

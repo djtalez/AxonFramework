@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2017. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -66,7 +66,7 @@ public interface StorageStrategy {
      *
      * @param snapshotCollection  the document collection that contains aggregate snapshot entries
      * @param aggregateIdentifier the identifier of the aggregate for which to delete all snapshots
-     * @param sequenceNumber The sequenceNumber representing the upper bound (exclusive) of the snapshots to delete
+     * @param sequenceNumber      The sequenceNumber representing the upper bound (exclusive) of the snapshots to delete
      */
     void deleteSnapshots(MongoCollection<Document> snapshotCollection, String aggregateIdentifier, long sequenceNumber);
 
@@ -96,7 +96,7 @@ public interface StorageStrategy {
      *
      * @param eventCollection The collection in which to find the events
      * @param lastToken       the token of the last event in the previous batch or {@code null} to load the oldest batch
-     * @param batchSize The maximum number of event entries to fetch
+     * @param batchSize       The maximum number of event entries to fetch
      * @return a list of matching tracked event entries
      */
     List<? extends TrackedEventData<?>> findTrackedEvents(MongoCollection<Document> eventCollection,
@@ -120,4 +120,22 @@ public interface StorageStrategy {
      * @param snapshotsCollection The collection containing the document representing snapshots
      */
     void ensureIndexes(MongoCollection<Document> eventsCollection, MongoCollection<Document> snapshotsCollection);
+
+    /**
+     * Return the last known sequence number for an Aggregate with given {@code aggregateIdentifier}, whose Events are
+     * stored in the given {@code eventsCollection}.
+     *
+     * @param eventsCollection    The Collection in which to search for Events
+     * @param aggregateIdentifier The aggregate to find the last sequence number for
+     * @return An optional with the last sequence number, or an empty optional if no Events are present for the given
+     * aggregate.
+     */
+    Optional<Long> lastSequenceNumberFor(MongoCollection<Document> eventsCollection, String aggregateIdentifier);
+
+    /**
+     * Creates a token that is at the tail of an event stream - that tracks events from the beginning of time.
+     *
+     * @return a tracking token at the tail of an event stream, if event stream is empty {@code null} is returned
+     */
+    TrackingToken createTailToken(MongoCollection<Document> eventsCollection);
 }

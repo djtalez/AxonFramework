@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2017. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import org.axonframework.monitoring.NoOpMessageMonitor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -34,7 +35,8 @@ import java.util.stream.Stream;
  * @author Rene de Waele
  */
 public abstract class AbstractEventStore extends AbstractEventBus implements EventStore {
-    private static final Logger logger = LoggerFactory.getLogger(EmbeddedEventStore.class);
+
+    private static final Logger logger = LoggerFactory.getLogger(AbstractEventStore.class);
 
     private final EventStorageEngine storageEngine;
 
@@ -77,9 +79,7 @@ public abstract class AbstractEventStore extends AbstractEventBus implements Eve
         try {
             optionalSnapshot = storageEngine.readSnapshot(aggregateIdentifier);
         } catch (Exception | LinkageError e) {
-            logger.warn("Error reading snapshot. Reconstructing aggregate from entire event stream. Caused by: {} {}",
-                        e.getClass().getName(), e.getMessage());
-            optionalSnapshot = Optional.empty();
+            optionalSnapshot = handleSnapshotReadingError(aggregateIdentifier, e);
         }
         DomainEventStream eventStream;
         if (optionalSnapshot.isPresent()) {
@@ -96,6 +96,29 @@ public abstract class AbstractEventStore extends AbstractEventBus implements Eve
     }
 
     /**
+     * Invoked when an error ({@link Exception} or {@link LinkageError}) occurs while attempting to read a snapshot
+     * event. This method can be overridden to change the default behavior, which is to log the exception (warn level)
+     * and ignore the snapshot.
+     * <p>
+     * Overriding implementations may choose to return normally, or raise an exception. Exceptions raised from this
+     * method are propagated to the caller of the {@link #readEvents(String)} or {@link #readEvents(String, long)}
+     * methods.
+     * <p>
+     * Returning an empty Optional will force the initialization of the aggregate to happen based on the entire event
+     * stream of that aggregate.
+     *
+     * @param aggregateIdentifier The identifier of the aggregate for which an snapshot failed to load
+     * @param e                   The exception or error that occurred while loading or deserializing the snapshot
+     * @return An optional DomainEventMessage to use as the snapshot for this aggregate
+     * @throws RuntimeException any runtimeException to fail loading the
+     */
+    protected Optional<DomainEventMessage<?>> handleSnapshotReadingError(String aggregateIdentifier, Throwable e) {
+        logger.warn("Error reading snapshot for aggregate [{}]. Reconstructing from entire event stream.",
+                    aggregateIdentifier, e);
+        return Optional.empty();
+    }
+
+    /**
      * Returns a Stream of all DomainEventMessages that have been staged for publication by an Aggregate with given
      * {@code aggregateIdentifier}.
      *
@@ -104,9 +127,9 @@ public abstract class AbstractEventStore extends AbstractEventBus implements Eve
      */
     protected Stream<? extends DomainEventMessage<?>> stagedDomainEventMessages(String aggregateIdentifier) {
         return queuedMessages().stream()
-                .filter(m -> m instanceof DomainEventMessage)
-                .map(m -> (DomainEventMessage<?>) m)
-                .filter(m -> aggregateIdentifier.equals(m.getAggregateIdentifier()));
+                               .filter(m -> m instanceof DomainEventMessage)
+                               .map(m -> (DomainEventMessage<?>) m)
+                               .filter(m -> aggregateIdentifier.equals(m.getAggregateIdentifier()));
     }
 
     @Override
@@ -129,5 +152,31 @@ public abstract class AbstractEventStore extends AbstractEventBus implements Eve
      */
     protected EventStorageEngine storageEngine() {
         return storageEngine;
+    }
+
+    @Override
+    public Optional<Long> lastSequenceNumberFor(String aggregateIdentifier) {
+        Optional<Long> highestStaged = stagedDomainEventMessages(aggregateIdentifier)
+                .map(DomainEventMessage::getSequenceNumber)
+                .max(Long::compareTo);
+        if (highestStaged.isPresent()) {
+            return highestStaged;
+        }
+        return storageEngine.lastSequenceNumberFor(aggregateIdentifier);
+    }
+
+    @Override
+    public TrackingToken createTailToken() {
+        return storageEngine.createTailToken();
+    }
+
+    @Override
+    public TrackingToken createHeadToken() {
+        return storageEngine.createHeadToken();
+    }
+
+    @Override
+    public TrackingToken createTokenAt(Instant dateTime) {
+        return storageEngine.createTokenAt(dateTime);
     }
 }

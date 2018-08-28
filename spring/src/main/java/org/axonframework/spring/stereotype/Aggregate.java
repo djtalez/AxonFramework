@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2017. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,8 +42,25 @@ public @interface Aggregate {
     String repository() default "";
 
     /**
+     * Sets the name of the bean providing the snapshot trigger definition. If none is provided, no snapshots are
+     * created, unless explicitly configured on the referenced repository.
+     * <p>
+     * Note that the use of {@link #repository()} overrides this setting, as a repository explicitly defines the
+     * snapshot trigger definition.
+     */
+    String snapshotTriggerDefinition() default "";
+
+    /**
      * Get the String representation of the aggregate's type. Optional. This defaults to the simple name of the
      * annotated class.
      */
     String type() default "";
+
+    /**
+     * Selects the name of the {@link org.axonframework.commandhandling.CommandTargetResolver} bean. If left empty,
+     * {@link org.axonframework.commandhandling.CommandTargetResolver} bean from application context will be used. If
+     * the bean is not defined in the application context, {@link org.axonframework.commandhandling.AnnotationCommandTargetResolver}
+     * will be used.
+     */
+    String commandTargetResolver() default "";
 }

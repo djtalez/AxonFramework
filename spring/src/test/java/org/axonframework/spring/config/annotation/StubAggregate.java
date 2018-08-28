@@ -36,14 +36,14 @@ public class StubAggregate {
     private int invocationCount;
 
     @AggregateIdentifier
-    private Object identifier;
+    private String identifier;
 
     public StubAggregate() {
-        identifier = UUID.randomUUID();
+        identifier = UUID.randomUUID().toString();
     }
 
     public StubAggregate(Object identifier) {
-        this.identifier = identifier;
+        this.identifier = identifier.toString();
     }
 
     public void doSomething() {
@@ -61,8 +61,8 @@ public class StubAggregate {
     }
 
     public DomainEventMessage createSnapshotEvent() {
-        return new GenericDomainEventMessage<>("test", identifier.toString(), (long) 5,
-                                                              new StubDomainEvent(), MetaData.emptyInstance());
+        return new GenericDomainEventMessage<>("test", identifier, (long) 5,
+                                               new StubDomainEvent(), MetaData.emptyInstance());
     }
 
     public void delete() {

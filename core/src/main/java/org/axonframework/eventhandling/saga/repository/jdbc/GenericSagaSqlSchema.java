@@ -118,7 +118,7 @@ public class GenericSagaSqlSchema implements SagaSqlSchema {
     }
 
     @Override
-    public String readToken(ResultSet resultSet) throws SQLException {
+    public String readToken(ResultSet resultSet) {
         // tokens not supported by this implementation
         return null;
     }
@@ -153,12 +153,11 @@ public class GenericSagaSqlSchema implements SagaSqlSchema {
     public PreparedStatement sql_updateSaga(Connection connection, String sagaIdentifier, byte[] serializedSaga,
                                             String sagaType, String revision) throws SQLException {
         final String sql = "UPDATE " + sagaSchema.sagaEntryTable()
-                + " SET serializedSaga = ?, revision = ? WHERE sagaId = ? AND sagaType = ?";
+                + " SET serializedSaga = ?, revision = ? WHERE sagaId = ?";
         PreparedStatement preparedStatement = connection.prepareStatement(sql);
         preparedStatement.setBytes(1, serializedSaga);
         preparedStatement.setString(2, revision);
         preparedStatement.setString(3, sagaIdentifier);
-        preparedStatement.setString(4, sagaType);
         return preparedStatement;
     }
 
@@ -178,7 +177,7 @@ public class GenericSagaSqlSchema implements SagaSqlSchema {
     @Override
     public PreparedStatement sql_createTableAssocValueEntry(Connection conn) throws SQLException {
         final String sql = "create table " + sagaSchema.associationValueEntryTable() + " (\n" +
-                "        id int not null AUTO_GENERATED,\n" +
+                "        id int not null AUTO_INCREMENT,\n" +
                 "        associationKey varchar(255),\n" +
                 "        associationValue varchar(255),\n" +
                 "        sagaId varchar(255),\n" +

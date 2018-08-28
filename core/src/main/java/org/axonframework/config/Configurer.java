@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2010-2017. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -22,8 +23,11 @@ import org.axonframework.eventhandling.saga.ResourceInjector;
 import org.axonframework.eventsourcing.eventstore.EventStorageEngine;
 import org.axonframework.eventsourcing.eventstore.EventStore;
 import org.axonframework.messaging.Message;
+import org.axonframework.messaging.annotation.HandlerDefinition;
 import org.axonframework.messaging.correlation.CorrelationDataProvider;
 import org.axonframework.monitoring.MessageMonitor;
+import org.axonframework.queryhandling.QueryBus;
+import org.axonframework.queryhandling.QueryUpdateEmitter;
 import org.axonframework.serialization.Serializer;
 import org.axonframework.serialization.upcasting.event.EventUpcaster;
 
@@ -32,8 +36,7 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 
 /**
- * Entry point of the Axon Configuration API. It implements the Configurer interface, providing access to the methods
- * to configure the default Axon components.
+ * Entry point of the Axon Configuration API.
  * <p>
  * Using {@link DefaultConfigurer#defaultConfiguration()}, you will get a Configurer instance with default components
  * configured. You will need to register your Aggregates (using {@link #configureAggregate(AggregateConfiguration)} and
@@ -54,14 +57,112 @@ public interface Configurer {
     Configurer registerEventUpcaster(Function<Configuration, EventUpcaster> upcasterBuilder);
 
     /**
-     * Configure the Message Monitor to use for the Message processing components in this configuration. The builder
-     * function receives the type of component as well as its name as input, and is expected to return a MessageMonitor
+     * Configures the Message Monitor to use for the Message processing components in this configuration, unless more
+     * specific configuration based on the component's type, or type and name is available. The builder function
+     * receives the type of component as well as its name as input, and is expected to return a MessageMonitor
      * instance to be used by that type of component.
      *
      * @param messageMonitorFactoryBuilder The MessageMonitor builder function
      * @return the current instance of the Configurer, for chaining purposes
      */
     Configurer configureMessageMonitor(Function<Configuration, BiFunction<Class<?>, String, MessageMonitor<Message<?>>>> messageMonitorFactoryBuilder);
+
+    /**
+     * Configures the builder function to create the Message Monitor for the Message processing components in this
+     * configuration that match the given componentType, unless more specific configuration based on both type and name
+     * is available.
+     * <p>
+     * <p>A component matches componentType if componentType is assignable from the component's class. If a component
+     * matches multiple types, and the types derive from each other, the configuration from the most derived type is
+     * used. If the matching types do not derive from each other, the result is unspecified.</p>
+     * <p>
+     * <p>For example: in case a monitor is configured for {@link CommandBus} and another monitor is configured for
+     * {@link org.axonframework.commandhandling.SimpleCommandBus SimpleCommandBus}), components of type
+     * {@link org.axonframework.commandhandling.AsynchronousCommandBus AsynchronousCommandBus} will use the monitor
+     * configured for the SimpleCommandBus.</p>
+     * <p>
+     * <p>A component's name matches componentName if they are identical; i.e. they are compared case sensitively.</p>
+     *
+     * @param componentType         The declared type of the component
+     * @param messageMonitorBuilder The builder function to use
+     * @return the current instance of the Configurer, for chaining purposes
+     */
+    default Configurer configureMessageMonitor(Class<?> componentType,
+                                               Function<Configuration, MessageMonitor<Message<?>>> messageMonitorBuilder) {
+        return configureMessageMonitor(componentType,
+                                       (configuration, type, name) -> messageMonitorBuilder.apply(configuration));
+    }
+
+    /**
+     * Configures the factory to create the Message Monitor for the Message processing components in this configuration
+     * that match the given componentType, unless more specific configuration based on both type and name is available.
+     * <p>
+     * <p>A component matches componentType if componentType is assignable from the component's class. If a component
+     * matches multiple types, and the types derive from each other, the configuration from the most derived type is
+     * used. If the matching types do not derive from each other, the result is unspecified.</p>
+     * <p>
+     * <p>For example: in case a monitor is configured for {@link CommandBus} and another monitor is configured for
+     * {@link org.axonframework.commandhandling.SimpleCommandBus SimpleCommandBus}), components of type
+     * {@link org.axonframework.commandhandling.AsynchronousCommandBus AsynchronousCommandBus} will use the monitor
+     * configured for the SimpleCommandBus.</p>
+     * <p>
+     * <p>A component's name matches componentName if they are identical; i.e. they are compared case sensitively.</p>
+     *
+     * @param componentType         The declared type of the component
+     * @param messageMonitorFactory The factory to use
+     * @return the current instance of the Configurer, for chaining purposes
+     */
+    Configurer configureMessageMonitor(Class<?> componentType, MessageMonitorFactory messageMonitorFactory);
+
+    /**
+     * Configures the builder function to create the Message Monitor for the Message processing components in this
+     * configuration that match the given class and name.
+     * <p>
+     * <p>A component matches componentType if componentType is assignable from the component's class. If a component
+     * matches multiple types, and the types derive from each other, the configuration from the most derived type is
+     * used. If the matching types do not derive from each other, the result is unspecified.</p>
+     * <p>
+     * <p>For example: in case a monitor is configured for {@link CommandBus} and another monitor is configured for
+     * {@link org.axonframework.commandhandling.SimpleCommandBus SimpleCommandBus}), components of type
+     * {@link org.axonframework.commandhandling.AsynchronousCommandBus AsynchronousCommandBus} will use the monitor
+     * configured for the SimpleCommandBus.</p>
+     * <p>
+     * <p>A component's name matches componentName if they are identical; i.e. they are compared case sensitively.</p>
+     *
+     * @param componentType         The declared type of the component
+     * @param componentName         The name of the component
+     * @param messageMonitorBuilder The builder function to use
+     * @return the current instance of the Configurer, for chaining purposes
+     */
+    default Configurer configureMessageMonitor(Class<?> componentType, String componentName,
+                                               Function<Configuration, MessageMonitor<Message<?>>> messageMonitorBuilder) {
+        return configureMessageMonitor(componentType,
+                                       componentName,
+                                       (configuration, type, name) -> messageMonitorBuilder.apply(configuration));
+    }
+
+    /**
+     * Configures the factory create the Message Monitor for those Message processing components in this configuration
+     * that match the given class and name.
+     * <p>
+     * <p>A component matches componentType if componentType is assignable from the component's class. If a component
+     * matches multiple types, and the types derive from each other, the configuration from the most derived type is
+     * used. If the matching types do not derive from each other, the result is unspecified.</p>
+     * <p>
+     * <p>For example: in case a monitor is configured for {@link CommandBus} and another monitor is configured for
+     * {@link org.axonframework.commandhandling.SimpleCommandBus SimpleCommandBus}), components of type
+     * {@link org.axonframework.commandhandling.AsynchronousCommandBus AsynchronousCommandBus} will use the monitor
+     * configured for the SimpleCommandBus.</p>
+     * <p>
+     * <p>A component's name matches componentName if they are identical; i.e. they are compared case sensitively.</p>
+     *
+     * @param componentType         The declared type of the component
+     * @param componentName         The name of the component
+     * @param messageMonitorFactory The factory to use
+     * @return the current instance of the Configurer, for chaining purposes
+     */
+    Configurer configureMessageMonitor(Class<?> componentType, String componentName,
+                                       MessageMonitorFactory messageMonitorFactory);
 
     /**
      * Configures the CorrelationDataProviders that Message processing components should use to attach correlation data
@@ -74,7 +175,7 @@ public interface Configurer {
     Configurer configureCorrelationDataProviders(Function<Configuration, List<CorrelationDataProvider>> correlationDataProviderBuilder);
 
     /**
-     * Register an Axon module with this configuration. The module is initialized when the configuration is created and
+     * Registers an Axon module with this configuration. The module is initialized when the configuration is created and
      * has access to the global configuration when initialized.
      * <p>
      * Typically, modules are registered for Event Handling components or Sagas.
@@ -87,12 +188,12 @@ public interface Configurer {
     Configurer registerModule(ModuleConfiguration module);
 
     /**
-     * Register a component which should be made available to other components or modules in this Configuration. The
+     * Registers a component which should be made available to other components or modules in this Configuration. The
      * builder function gets this configuration as input, and is expected to provide the component as output.
      * <p>
      * Where possible, it is recommended to use the explicit {@code configure...} and {@code register...} methods.
      *
-     * @param componentType    The declared type of the components, typically an interface
+     * @param componentType    The declared type of the component, typically an interface
      * @param componentBuilder The builder function of this component
      * @param <C>              The type of component
      * @return the current instance of the Configurer, for chaining purposes
@@ -109,11 +210,59 @@ public interface Configurer {
      * @param annotatedCommandHandlerBuilder The builder function of the Command Handler bean
      * @return the current instance of the Configurer, for chaining purposes
      */
-    Configurer registerCommandHandler(Function<Configuration, Object> annotatedCommandHandlerBuilder);
+    default Configurer registerCommandHandler(Function<Configuration, Object> annotatedCommandHandlerBuilder) {
+        return registerCommandHandler(0, annotatedCommandHandlerBuilder);
+    }
 
     /**
-     * Configure an Embedded Event Store which uses the given Event Storage Engine to store its events. The builder
-     * receives the Configuration is input and is expected to return a fully initialized {@link EventStorageEngine}
+     * Registers a command handler bean with this configuration. The bean may be of any type. The actual command handler
+     * methods will be detected based on the annotations present on the bean's methods.
+     * <p>
+     * The builder function receives the Configuration as input, and is expected to return a fully initialized instance
+     * of the command handler bean.
+     *
+     * @param annotatedCommandHandlerBuilder The builder function of the Command Handler bean
+     * @param phase                          defines a phase in which the command handler builder will be invoked during
+     *                                       {@link Configuration#start()} and {@link Configuration#shutdown()}. When
+     *                                       starting the configuration handlers are ordered in ascending, when shutting
+     *                                       down the configuration, descending order is used.
+     * @return the current instance of the Configurer, for chaining purposes
+     */
+    Configurer registerCommandHandler(int phase, Function<Configuration, Object> annotatedCommandHandlerBuilder);
+
+    /**
+     * Registers a query handler bean with this configuration. The bean may be of any type. The actual query handler
+     * methods will be detected based on the annotations present on the bean's methods.
+     * <p>
+     * The builder function receives the Configuration as input, and is expected to return a fully initialized instance
+     * of the query handler bean.
+     *
+     * @param annotatedQueryHandlerBuilder The builder function of the Query Handler bean
+     * @return the current instance of the Configurer, for chaining purposes
+     */
+    default Configurer registerQueryHandler(Function<Configuration, Object> annotatedQueryHandlerBuilder) {
+        return registerQueryHandler(0, annotatedQueryHandlerBuilder);
+    }
+
+    /**
+     * Registers a query handler bean with this configuration. The bean may be of any type. The actual query handler
+     * methods will be detected based on the annotations present on the bean's methods.
+     * <p>
+     * The builder function receives the Configuration as input, and is expected to return a fully initialized instance
+     * of the query handler bean.
+     *
+     * @param annotatedQueryHandlerBuilder The builder function of the Query Handler bean
+     * @param phase                        defines a phase in which the query handler builder will be invoked during
+     *                                     {@link Configuration#start()} and {@link Configuration#shutdown()}. When
+     *                                     starting the configuration handlers are ordered in ascending, when shutting
+     *                                     down the configuration, descending order is used.
+     * @return the current instance of the Configurer, for chaining purposes
+     */
+    Configurer registerQueryHandler(int phase, Function<Configuration, Object> annotatedQueryHandlerBuilder);
+
+    /**
+     * Configures an Embedded Event Store which uses the given Event Storage Engine to store its events. The builder
+     * receives the Configuration as input and is expected to return a fully initialized {@link EventStorageEngine}
      * instance.
      *
      * @param storageEngineBuilder The builder function for the {@link EventStorageEngine}
@@ -122,7 +271,7 @@ public interface Configurer {
     Configurer configureEmbeddedEventStore(Function<Configuration, EventStorageEngine> storageEngineBuilder);
 
     /**
-     * Configure the given Event Store to use in this configuration. The builder receives the Configuration as input
+     * Configures the given Event Store to use in this configuration. The builder receives the Configuration as input
      * and is expected to return a fully initialized {@link EventStore}
      * instance.
      *
@@ -134,7 +283,7 @@ public interface Configurer {
     }
 
     /**
-     * Configure the given Event Bus to use in this configuration. The builder receives the Configuration as input
+     * Configures the given Event Bus to use in this configuration. The builder receives the Configuration as input
      * and is expected to return a fully initialized {@link EventBus}
      * instance.
      * <p>
@@ -149,7 +298,7 @@ public interface Configurer {
     }
 
     /**
-     * Configure the given Command Bus to use in this configuration. The builder receives the Configuration as input
+     * Configures the given Command Bus to use in this configuration. The builder receives the Configuration as input
      * and is expected to return a fully initialized {@link CommandBus}
      * instance.
      *
@@ -161,7 +310,31 @@ public interface Configurer {
     }
 
     /**
-     * Configure the given Serializer to use in this configuration. The builder receives the Configuration as input
+     * Configures the given Query Bus to use in this configuration. The builder receives the Configuration as input
+     * and is expected to return a fully initialized {@link QueryBus}
+     * instance.
+     *
+     * @param queryBusBuilder The builder function for the {@link QueryBus}
+     * @return the current instance of the Configurer, for chaining purposes
+     */
+    default Configurer configureQueryBus(Function<Configuration, QueryBus> queryBusBuilder) {
+        return registerComponent(QueryBus.class, queryBusBuilder);
+    }
+
+    /**
+     * Configures the given Query Update Emitter to use in this configuration. The builder receives the Configuration as
+     * input and is expected to return a fully initialized {@link QueryUpdateEmitter} instance.
+     *
+     * @param queryUpdateEmitterBuilder The builder function for the {@link QueryUpdateEmitter}
+     * @return the current instance of the Configurer, for chaining purposes
+     */
+    default Configurer configureQueryUpdateEmitter(
+            Function<Configuration, QueryUpdateEmitter> queryUpdateEmitterBuilder) {
+        return registerComponent(QueryUpdateEmitter.class, queryUpdateEmitterBuilder);
+    }
+
+    /**
+     * Configures the given Serializer to use in this configuration. The builder receives the Configuration as input
      * and is expected to return a fully initialized {@link Serializer}
      * instance.
      *
@@ -173,7 +346,29 @@ public interface Configurer {
     }
 
     /**
-     * Configure the given Transaction Manager to use in this configuration. The builder receives the Configuration as
+     * Configures the given event Serializer to use in this configuration. The builder receives the Configuration as
+     * input and is expected to return a fully initialized {@link org.axonframework.serialization.Serializer} instance.
+     * <p/>
+     * This Serializer is specifically used to serialize EventMessage payload and metadata.
+     *
+     * @param eventSerializerBuilder The builder function for the {@link org.axonframework.serialization.Serializer}.
+     * @return The current instance of the Configurer, for chaining purposes.
+     */
+    Configurer configureEventSerializer(Function<Configuration, Serializer> eventSerializerBuilder);
+
+    /**
+     * Configures the given event Serializer to use in this configuration. The builder receives the Configuration as
+     * input and is expected to return a fully initialized {@link org.axonframework.serialization.Serializer} instance.
+     * <p/>
+     * This Serializer is specifically used to serialize Message payload and Metadata.
+     *
+     * @param messageSerializerBuilder The builder function for the {@link org.axonframework.serialization.Serializer}.
+     * @return The current instance of the Configurer, for chaining purposes.
+     */
+    Configurer configureMessageSerializer(Function<Configuration, Serializer> messageSerializerBuilder);
+
+    /**
+     * Configures the given Transaction Manager to use in this configuration. The builder receives the Configuration as
      * input and is expected to return a fully initialized {@link TransactionManager}
      * instance.
      *
@@ -185,7 +380,7 @@ public interface Configurer {
     }
 
     /**
-     * Configure the given Resource Injector to use for Sagas in this configuration. The builder receives the
+     * Configures the given Resource Injector to use for Sagas in this configuration. The builder receives the
      * Configuration as input and is expected to return a fully initialized {@link ResourceInjector} instance.
      *
      * @param resourceInjectorBuilder The builder function for the {@link ResourceInjector}
@@ -200,7 +395,7 @@ public interface Configurer {
      * allows for more fine-grained configuration compared to the {@link #configureAggregate(Class)} method.
      *
      * @param aggregateConfiguration The instance describing the configuration of an Aggregate
-     * @param <A>                    the type of aggregate the configuration is for
+     * @param <A>                    The type of aggregate the configuration is for
      * @return the current instance of the Configurer, for chaining purposes
      * @see AggregateConfigurer
      */
@@ -218,6 +413,15 @@ public interface Configurer {
     default <A> Configurer configureAggregate(Class<A> aggregate) {
         return configureAggregate(AggregateConfigurer.defaultConfiguration(aggregate));
     }
+
+    /**
+     * Registers the definition of a Handler class. Defaults to annotation based recognition of handler methods.
+     *
+     * @param handlerDefinitionClass A function providing the definition based on the current Configuration as well
+     *                               as the class being inspected.
+     * @return the current instance of the Configurer, for chaining purposes
+     */
+    Configurer registerHandlerDefinition(BiFunction<Configuration, Class, HandlerDefinition> handlerDefinitionClass);
 
     /**
      * Returns the completely initialized Configuration built using this configurer. It is not recommended to change

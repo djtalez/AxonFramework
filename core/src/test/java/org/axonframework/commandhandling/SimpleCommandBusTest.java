@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012. Axon Framework
+ * Copyright (c) 2010-2017. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,17 +17,21 @@
 package org.axonframework.commandhandling;
 
 import org.axonframework.common.Registration;
+import org.axonframework.common.transaction.NoTransactionManager;
 import org.axonframework.messaging.InterceptorChain;
 import org.axonframework.messaging.MessageHandler;
 import org.axonframework.messaging.MessageHandlerInterceptor;
 import org.axonframework.messaging.unitofwork.CurrentUnitOfWork;
 import org.axonframework.messaging.unitofwork.RollbackConfigurationType;
 import org.axonframework.messaging.unitofwork.UnitOfWork;
+import org.axonframework.monitoring.MessageMonitor;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.InOrder;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.*;
@@ -123,7 +127,7 @@ public class SimpleCommandBusTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    public void testDispatchCommand_UnitOfWorkIsCommittedOnCheckedException() throws Exception {
+    public void testDispatchCommand_UnitOfWorkIsCommittedOnCheckedException() {
         final AtomicReference<UnitOfWork<?>> unitOfWork = new AtomicReference<>();
         testSubject.subscribe(String.class.getName(), command -> {
             unitOfWork.set(CurrentUnitOfWork.get());
@@ -160,6 +164,36 @@ public class SimpleCommandBusTest {
         Registration subscription = testSubject.subscribe(String.class.getName(), commandHandler);
         subscription.close();
         testSubject.dispatch(GenericCommandMessage.asCommandMessage("Say hi!"), mock(CommandCallback.class));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void testDispatchCommand_NoHandlerSubscribedCallsMonitorCallbackIgnored() throws InterruptedException {
+        final CountDownLatch countDownLatch = new CountDownLatch(1);
+        MessageMonitor<? super CommandMessage<?>> messageMonitor = (message) -> new MessageMonitor.MonitorCallback() {
+            @Override
+            public void reportSuccess() {
+                fail("Expected #reportFailure");
+            }
+            @Override
+            public void reportFailure(Throwable cause) {
+                countDownLatch.countDown();
+            }
+            @Override
+            public void reportIgnored() {
+                fail("Expected #reportFailure");
+            }
+        };
+
+        testSubject = new SimpleCommandBus(NoTransactionManager.INSTANCE, messageMonitor);
+
+        try {
+            testSubject.dispatch(GenericCommandMessage.asCommandMessage("test"), mock(CommandCallback.class));
+        } catch (NoHandlerForCommandException expected) {
+            // ignore
+        }
+
+        assertTrue(countDownLatch.await(10, TimeUnit.SECONDS));
     }
 
     @SuppressWarnings({"unchecked"})
@@ -276,7 +310,7 @@ public class SimpleCommandBusTest {
 
     private static class MyStringCommandHandler implements MessageHandler<CommandMessage<?>> {
         @Override
-        public Object handle(CommandMessage<?> message) throws Exception {
+        public Object handle(CommandMessage<?> message) {
             return message;
         }
     }

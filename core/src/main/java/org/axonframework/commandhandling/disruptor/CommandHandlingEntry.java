@@ -23,6 +23,7 @@ import org.axonframework.messaging.MessageHandler;
 import org.axonframework.messaging.MessageHandlerInterceptor;
 
 import java.util.List;
+import java.util.concurrent.Callable;
 
 /**
  * DataHolder for the DisruptorCommandBus. The CommandHandlingEntry maintains all information required for or produced
@@ -47,7 +48,6 @@ public class CommandHandlingEntry extends DisruptorUnitOfWork<CommandMessage<?>>
 
     /**
      * Initializes the CommandHandlingEntry
-     *
      */
     public CommandHandlingEntry() {
         repeatingCommandHandler = new RepeatingCommandHandler();
@@ -65,8 +65,7 @@ public class CommandHandlingEntry extends DisruptorUnitOfWork<CommandMessage<?>>
 
     /**
      * Returns the InterceptorChain for the publication process registered with this entry, or {@code null} if
-     * none
-     * is available.
+     * none is available.
      *
      * @return the InterceptorChain for the publication process registered with this entry
      */
@@ -163,16 +162,19 @@ public class CommandHandlingEntry extends DisruptorUnitOfWork<CommandMessage<?>>
     /**
      * Resets this entry, preparing it for use for another command.
      *
-     * @param newCommand             The new command the entry is used for
-     * @param newCommandHandler      The Command Handler responsible for handling {@code newCommand}
-     * @param newInvokerSegmentId    The SegmentID of the invoker that should process this entry
-     * @param newPublisherSegmentId  The SegmentID of the publisher that should process this entry
-     * @param newCallback            The callback to report the result of command execution to
-     * @param invokerInterceptors    The interceptors to invoke during the command handler invocation phase
-     * @param publisherInterceptors  The interceptors to invoke during the publication phase
+     * @param newCommand            The new command the entry is used for
+     * @param newCommandHandler     The Command Handler responsible for handling {@code newCommand}
+     * @param newInvokerSegmentId   The SegmentID of the invoker that should process this entry
+     * @param newPublisherSegmentId The SegmentID of the publisher that should process this entry
+     * @param newCallback           The callback to report the result of command execution to
+     * @param invokerInterceptors   The interceptors to invoke during the command handler invocation phase
+     * @param publisherInterceptors The interceptors to invoke during the publication phase
      */
-    public void reset(CommandMessage<?> newCommand, MessageHandler<? super CommandMessage<?>> newCommandHandler, // NOSONAR - Not important
-                      int newInvokerSegmentId, int newPublisherSegmentId, BlacklistDetectingCallback newCallback,
+    public void reset(CommandMessage<?> newCommand,
+                      MessageHandler<? super CommandMessage<?>> newCommandHandler,// NOSONAR - Not important
+                      int newInvokerSegmentId,
+                      int newPublisherSegmentId,
+                      BlacklistDetectingCallback newCallback,
                       List<MessageHandlerInterceptor<? super CommandMessage<?>>> invokerInterceptors,
                       List<MessageHandlerInterceptor<? super CommandMessage<?>>> publisherInterceptors) {
         this.invokerSegmentId = newInvokerSegmentId;
@@ -207,6 +209,31 @@ public class CommandHandlingEntry extends DisruptorUnitOfWork<CommandMessage<?>>
         invokerSegmentId = -1;
         publisherSegmentId = -1;
         this.aggregateIdentifier = newAggregateIdentifier;
+        reset(null);
+    }
+
+    /**
+     * Resets this entry, preparing it to run given {@code callable} from within the {@code invocationInterceptorChain}.
+     *
+     * @param callable              a {@link Callable} which performs a task in the {@code invocationInterceptorChain},
+     *                              for example publishing a scheduled {@link org.axonframework.deadline.DeadlineMessage}
+     * @param newInvokerSegmentId   The SegmentId of the invoker that should process this entry
+     * @param newPublisherSegmentId The SegmentId of the publisher that should process this entry
+     * @param newCallback           The callback to report the result of command execution to
+     */
+    public void resetAsCallable(Callable<Object> callable,
+                                int newInvokerSegmentId,
+                                int newPublisherSegmentId,
+                                BlacklistDetectingCallback<Object, Object> newCallback) {
+        this.isRecoverEntry = false;
+        this.invokerSegmentId = newInvokerSegmentId;
+        this.publisherSegmentId = newPublisherSegmentId;
+        this.callback = newCallback;
+        result = null;
+        exceptionResult = null;
+        aggregateIdentifier = null;
+        invocationInterceptorChain = callable::call;
+        publisherInterceptorChain = () -> repeatingCommandHandler.handle(null);
         reset(null);
     }
 

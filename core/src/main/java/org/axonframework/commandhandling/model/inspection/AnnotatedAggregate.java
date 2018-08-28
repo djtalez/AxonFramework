@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,23 +17,32 @@
 package org.axonframework.commandhandling.model.inspection;
 
 import org.axonframework.commandhandling.CommandMessage;
-import org.axonframework.commandhandling.model.Aggregate;
-import org.axonframework.commandhandling.model.AggregateInvocationException;
-import org.axonframework.commandhandling.model.AggregateLifecycle;
-import org.axonframework.commandhandling.model.ApplyMore;
+import org.axonframework.commandhandling.model.*;
+import org.axonframework.common.Assert;
+import org.axonframework.common.AxonConfigurationException;
 import org.axonframework.eventhandling.EventBus;
 import org.axonframework.eventhandling.EventMessage;
 import org.axonframework.eventhandling.GenericEventMessage;
+import org.axonframework.eventsourcing.DomainEventMessage;
+import org.axonframework.eventsourcing.GenericDomainEventMessage;
+import org.axonframework.messaging.DefaultInterceptorChain;
 import org.axonframework.messaging.Message;
 import org.axonframework.messaging.MetaData;
 import org.axonframework.messaging.annotation.MessageHandlingMember;
+import org.axonframework.messaging.unitofwork.CurrentUnitOfWork;
+import org.axonframework.messaging.unitofwork.UnitOfWork;
 
 import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
+import static java.lang.String.format;
 
 /**
  * Implementation of the {@link Aggregate} interface that allows for an aggregate root to be a POJO with annotations on
@@ -50,11 +59,69 @@ import java.util.function.Supplier;
 public class AnnotatedAggregate<T> extends AggregateLifecycle implements Aggregate<T>, ApplyMore {
 
     private final AggregateModel<T> inspector;
+    private final RepositoryProvider repositoryProvider;
     private final Queue<Runnable> delayedTasks = new LinkedList<>();
     private final EventBus eventBus;
     private T aggregateRoot;
     private boolean applying = false;
     private boolean isDeleted = false;
+    private Long lastKnownSequence;
+
+    /**
+     * Initialize an Aggregate instance for the given {@code aggregateRoot}, described by the given
+     * {@code aggregateModel} that will publish events to the given {@code eventBus}.
+     *
+     * @param aggregateRoot The aggregate root instance
+     * @param model         The model describing the aggregate structure
+     * @param eventBus      The Event Bus to publish generated events on
+     */
+    protected AnnotatedAggregate(T aggregateRoot, AggregateModel<T> model, EventBus eventBus) {
+        this(aggregateRoot, model, eventBus, null);
+    }
+
+    /**
+     * Initialize an Aggregate instance for the given {@code aggregateRoot}, described by the given
+     * {@code aggregateModel} that will publish events to the given {@code eventBus}.
+     *
+     * @param aggregateRoot      The aggregate root instance
+     * @param model              The model describing the aggregate structure
+     * @param eventBus           The Event Bus to publish generated events on
+     * @param repositoryProvider Provides repositories for specific aggregate types
+     */
+    protected AnnotatedAggregate(T aggregateRoot,
+                                 AggregateModel<T> model,
+                                 EventBus eventBus,
+                                 RepositoryProvider repositoryProvider) {
+        this(model, eventBus, repositoryProvider);
+        this.aggregateRoot = aggregateRoot;
+    }
+
+    /**
+     * Initialize an Aggregate instance for the given {@code aggregateRoot}, described by the given
+     * {@code aggregateModel} that will publish events to the given {@code eventBus}.
+     *
+     * @param inspector The AggregateModel that describes the aggregate
+     * @param eventBus  The Event Bus to publish generated events on
+     */
+    protected AnnotatedAggregate(AggregateModel<T> inspector, EventBus eventBus) {
+        this(inspector, eventBus, null);
+    }
+
+    /**
+     * Initialize an Aggregate instance for the given {@code aggregateRoot}, described by the given
+     * {@code aggregateModel} that will publish events to the given {@code eventBus}.
+     *
+     * @param inspector          The AggregateModel that describes the aggregate
+     * @param eventBus           The Event Bus to publish generated events on
+     * @param repositoryProvider Provides repositories for specific aggregate types
+     */
+    protected AnnotatedAggregate(AggregateModel<T> inspector,
+                                 EventBus eventBus,
+                                 RepositoryProvider repositoryProvider) {
+        this.inspector = inspector;
+        this.eventBus = eventBus;
+        this.repositoryProvider = repositoryProvider;
+    }
 
     /**
      * Initialize an aggregate created by the given {@code aggregateFactory} which is described in the given
@@ -65,12 +132,79 @@ public class AnnotatedAggregate<T> extends AggregateLifecycle implements Aggrega
      * @param eventBus         The EventBus to publish events on
      * @param <T>              The type of the Aggregate root
      * @return An Aggregate instance, fully initialized
+     *
      * @throws Exception when an error occurs creating the aggregate root instance
      */
     public static <T> AnnotatedAggregate<T> initialize(Callable<T> aggregateFactory, AggregateModel<T> aggregateModel,
-                                                       EventBus eventBus) throws Exception {
-        AnnotatedAggregate<T> aggregate = new AnnotatedAggregate<>(aggregateModel, eventBus);
-        aggregate.registerWithUnitOfWork();
+                                                       EventBus eventBus)
+            throws Exception {
+        return initialize(aggregateFactory, aggregateModel, eventBus, false);
+    }
+
+    /**
+     * Initialize an aggregate created by the given {@code aggregateFactory} which is described in the given
+     * {@code aggregateModel}. The given {@code eventBus} is used to publish events generated by the aggregate.
+     *
+     * @param aggregateFactory   The factory to create the aggregate root instance with
+     * @param aggregateModel     The model describing the aggregate structure
+     * @param eventBus           The EventBus to publish events on
+     * @param repositoryProvider Provides repositories for specific aggregate types
+     * @param <T>                The type of the Aggregate root
+     * @return An Aggregate instance, fully initialized
+     *
+     * @throws Exception when an error occurs creating the aggregate root instance
+     */
+    public static <T> AnnotatedAggregate<T> initialize(Callable<T> aggregateFactory,
+                                                       AggregateModel<T> aggregateModel,
+                                                       EventBus eventBus,
+                                                       RepositoryProvider repositoryProvider) throws Exception {
+        return initialize(aggregateFactory, aggregateModel, eventBus, repositoryProvider, false);
+    }
+
+    /**
+     * Initialize an aggregate created by the given {@code aggregateFactory} which is described in the given
+     * {@code aggregateModel}. The given {@code eventBus} is used to publish events generated by the aggregate.
+     *
+     * @param aggregateFactory  The factory to create the aggregate root instance with
+     * @param aggregateModel    The model describing the aggregate structure
+     * @param eventBus          The EventBus to publish events on
+     * @param generateSequences Whether to generate sequence numbers on events published from this aggregate
+     * @param <T>               The type of the Aggregate root
+     * @return An Aggregate instance, fully initialized
+     *
+     * @throws Exception when an error occurs creating the aggregate root instance
+     */
+    public static <T> AnnotatedAggregate<T> initialize(Callable<T> aggregateFactory,
+                                                       AggregateModel<T> aggregateModel,
+                                                       EventBus eventBus,
+                                                       boolean generateSequences) throws Exception {
+        return initialize(aggregateFactory, aggregateModel, eventBus, null, generateSequences);
+    }
+
+    /**
+     * Initialize an aggregate created by the given {@code aggregateFactory} which is described in the given
+     * {@code aggregateModel}. The given {@code eventBus} is used to publish events generated by the aggregate.
+     *
+     * @param aggregateFactory   The factory to create the aggregate root instance with
+     * @param aggregateModel     The model describing the aggregate structure
+     * @param eventBus           The EventBus to publish events on
+     * @param repositoryProvider Provides repositories for specific aggregate types
+     * @param generateSequences  Whether to generate sequence numbers on events published from this aggregate
+     * @param <T>                The type of the Aggregate root
+     * @return An Aggregate instance, fully initialized
+     *
+     * @throws Exception when an error occurs creating the aggregate root instance
+     */
+    public static <T> AnnotatedAggregate<T> initialize(Callable<T> aggregateFactory,
+                                                       AggregateModel<T> aggregateModel,
+                                                       EventBus eventBus,
+                                                       RepositoryProvider repositoryProvider,
+                                                       boolean generateSequences) throws Exception {
+        AnnotatedAggregate<T> aggregate =
+                new AnnotatedAggregate<>(aggregateModel, eventBus, repositoryProvider);
+        if (generateSequences) {
+            aggregate.initSequence();
+        }
         aggregate.registerRoot(aggregateFactory);
         return aggregate;
     }
@@ -85,37 +219,48 @@ public class AnnotatedAggregate<T> extends AggregateLifecycle implements Aggrega
      * @param <T>            The type of the Aggregate root
      * @return An Aggregate instance, fully initialized
      */
-    public static <T> AnnotatedAggregate<T> initialize(T aggregateRoot, AggregateModel<T> aggregateModel,
+    public static <T> AnnotatedAggregate<T> initialize(T aggregateRoot,
+                                                       AggregateModel<T> aggregateModel,
                                                        EventBus eventBus) {
-        AnnotatedAggregate<T> aggregate = new AnnotatedAggregate<>(aggregateRoot, aggregateModel, eventBus);
-        aggregate.registerWithUnitOfWork();
-        return aggregate;
+        return initialize(aggregateRoot, aggregateModel, eventBus, null);
     }
 
     /**
-     * Initialize an Aggregate instance for the given {@code aggregateRoot}, described by the given
-     * {@code aggregateModel} that will publish events to the given {@code eventBus}.
+     * Initialize an aggregate with the given {@code aggregateRoot} which is described in the given
+     * {@code aggregateModel}. The given {@code eventBus} is used to publish events generated by the aggregate.
      *
-     * @param aggregateRoot The aggregate root instance
-     * @param model         The model describing the aggregate structure
-     * @param eventBus      The Event Bus to publish generated events on
+     * @param aggregateRoot      The aggregate root instance
+     * @param aggregateModel     The model describing the aggregate structure
+     * @param eventBus           The EventBus to publish events on
+     * @param repositoryProvider Provides repositories for specific aggregate types
+     * @param <T>                The type of the Aggregate root
+     * @return An Aggregate instance, fully initialized
      */
-    protected AnnotatedAggregate(T aggregateRoot, AggregateModel<T> model, EventBus eventBus) {
-        this.aggregateRoot = aggregateRoot;
-        this.inspector = model;
-        this.eventBus = eventBus;
+    public static <T> AnnotatedAggregate<T> initialize(T aggregateRoot,
+                                                       AggregateModel<T> aggregateModel,
+                                                       EventBus eventBus,
+                                                       RepositoryProvider repositoryProvider) {
+        return new AnnotatedAggregate<>(aggregateRoot, aggregateModel, eventBus, repositoryProvider);
     }
 
     /**
-     * Initialize an Aggregate instance for the given {@code aggregateRoot}, described by the given
-     * {@code aggregateModel} that will publish events to the given {@code eventBus}.
-     *
-     * @param inspector The AggregateModel that describes the aggregate
-     * @param eventBus  The Event Bus to publish generated events on
+     * Enable sequences on this Aggregate, causing it to emit DomainEventMessages, starting at sequence 0. Each Event
+     * applied will increase the sequence, allowing to trace each event back to the Aggregate instance that published
+     * it, in the order published.
      */
-    protected AnnotatedAggregate(AggregateModel<T> inspector, EventBus eventBus) {
-        this.inspector = inspector;
-        this.eventBus = eventBus;
+    public void initSequence() {
+        initSequence(-1);
+    }
+
+    /**
+     * Enable sequences on this Aggregate, causing it to emit DomainEventMessages based on the given
+     * {@code lastKnownSequenceNumber}. Each Event applied will increase the sequence, allowing to trace each event
+     * back to the Aggregate instance that published it, in the order published.
+     *
+     * @param lastKnownSequenceNumber The sequence number to pass into the next event published
+     */
+    public void initSequence(long lastKnownSequenceNumber) {
+        this.lastKnownSequence = lastKnownSequenceNumber;
     }
 
     /**
@@ -132,7 +277,7 @@ public class AnnotatedAggregate<T> extends AggregateLifecycle implements Aggrega
         execute(() -> {
             applying = true;
             while (!delayedTasks.isEmpty()) {
-                delayedTasks.poll().run();
+                delayedTasks.remove().run();
             }
             applying = false;
         });
@@ -153,9 +298,34 @@ public class AnnotatedAggregate<T> extends AggregateLifecycle implements Aggrega
         return inspector.getVersion(aggregateRoot);
     }
 
+    /**
+     * Returns the last sequence of any event published, or {@code null} if no events have been published yet. If
+     * sequences aren't enabled for this Aggregate, the this method will also return null;
+     *
+     * @return the last sequence of any event published, or {@code null} if no events have been published yet
+     */
+    public Long lastSequence() {
+        return lastKnownSequence == -1 ? null : lastKnownSequence;
+    }
+
     @Override
     protected boolean getIsLive() {
         return true;
+    }
+
+    @Override
+    protected <R> Aggregate<R> doCreateNew(Class<R> aggregateType, Callable<R> factoryMethod) throws Exception {
+        if (repositoryProvider == null) {
+            throw new AxonConfigurationException(format(
+                    "Since repository provider is not provided, we cannot spawn a new aggregate for %s",
+                    aggregateType.getName()));
+        }
+        Repository<R> repository = repositoryProvider.repositoryFor(aggregateType);
+        if (repository == null) {
+            throw new IllegalStateException(format("There is no configured repository for %s",
+                                                   aggregateType.getName()));
+        }
+        return repository.newInstance(factoryMethod);
     }
 
     @Override
@@ -197,6 +367,9 @@ public class AnnotatedAggregate<T> extends AggregateLifecycle implements Aggrega
      * @param msg the event message to publish
      */
     protected void publish(EventMessage<?> msg) {
+        if (msg instanceof DomainEventMessage) {
+            lastKnownSequence = ((DomainEventMessage) msg).getSequenceNumber();
+        }
         inspector.publish(msg, aggregateRoot);
         publishOnEventBus(msg);
     }
@@ -214,16 +387,53 @@ public class AnnotatedAggregate<T> extends AggregateLifecycle implements Aggrega
 
     @SuppressWarnings("unchecked")
     @Override
-    public Object handle(CommandMessage<?> msg) throws Exception {
-        return executeWithResult(() -> {
-            MessageHandlingMember<? super T> handler = inspector.commandHandlers().get(msg.getCommandName());
-            Object result = handler.handle(msg, aggregateRoot);
-            if (aggregateRoot == null) {
-                aggregateRoot = (T) result;
-                return identifierAsString();
-            }
-            return result;
-        });
+    public Object handle(Message<?> message) throws Exception {
+        Callable<Object> messageHandling;
+
+        if (message instanceof CommandMessage) {
+            messageHandling = () -> handle((CommandMessage) message);
+        } else if (message instanceof EventMessage) {
+            messageHandling = () -> handle((EventMessage) message);
+        } else {
+            throw new IllegalArgumentException("Unsupported message type: " + message.getClass());
+        }
+
+        return executeWithResult(messageHandling);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object handle(CommandMessage<?> commandMessage) throws Exception {
+        List<AnnotatedCommandHandlerInterceptor<? super T>> interceptors =
+                inspector.commandHandlerInterceptors()
+                         .stream()
+                         .filter(chi -> chi.canHandle(commandMessage))
+                         .sorted((chi1, chi2) -> Integer.compare(chi2.priority(), chi1.priority()))
+                         .map(chi -> new AnnotatedCommandHandlerInterceptor<>(chi, aggregateRoot))
+                         .collect(Collectors.toList());
+        MessageHandlingMember<? super T> handler = inspector.commandHandlers()
+                                                            .get(commandMessage.getCommandName());
+
+        Object result;
+        if (interceptors.isEmpty()) {
+            result = handler.handle(commandMessage, aggregateRoot);
+        } else {
+            result = new DefaultInterceptorChain<>(
+                    (UnitOfWork<CommandMessage<?>>) CurrentUnitOfWork.get(),
+                    interceptors,
+                    m -> handler.handle(commandMessage, aggregateRoot)
+            ).proceed();
+        }
+
+        if (aggregateRoot == null) {
+            aggregateRoot = (T) result;
+            return identifierAsString();
+        }
+        return result;
+    }
+
+    private Object handle(EventMessage<?> eventMessage) {
+        inspector.publish(eventMessage, aggregateRoot);
+        return null;
     }
 
     @Override
@@ -233,7 +443,7 @@ public class AnnotatedAggregate<T> extends AggregateLifecycle implements Aggrega
             try {
                 publish(createMessage(payload, metaData));
                 while (!delayedTasks.isEmpty()) {
-                    delayedTasks.poll().run();
+                    delayedTasks.remove().run();
                 }
             } finally {
                 delayedTasks.clear();
@@ -254,6 +464,16 @@ public class AnnotatedAggregate<T> extends AggregateLifecycle implements Aggrega
      * @return the resulting message
      */
     protected <P> EventMessage<P> createMessage(P payload, MetaData metaData) {
+        if (lastKnownSequence != null) {
+            long seq = lastKnownSequence + 1;
+            String id = identifierAsString();
+            if (id == null) {
+                Assert.state(seq == 0,
+                             () -> "The aggregate identifier has not been set. It must be set at the latest when applying the creation event");
+                return new LazyIdentifierDomainEventMessage<>(type(), seq, payload, metaData);
+            }
+            return new GenericDomainEventMessage<>(type(), identifierAsString(), seq, payload, metaData);
+        }
         return new GenericEventMessage<>(payload, metaData);
     }
 
@@ -298,4 +518,42 @@ public class AnnotatedAggregate<T> extends AggregateLifecycle implements Aggrega
         }
     }
 
+    private class LazyIdentifierDomainEventMessage<P> extends GenericDomainEventMessage<P> {
+
+        private static final long serialVersionUID = -1624446038982565972L;
+
+        public LazyIdentifierDomainEventMessage(String type, long seq, P payload, MetaData metaData) {
+            super(type, null, seq, payload, metaData);
+        }
+
+        @Override
+        public String getAggregateIdentifier() {
+            return identifierAsString();
+        }
+
+        @Override
+        public GenericDomainEventMessage<P> withMetaData(Map<String, ?> newMetaData) {
+            String identifier = identifierAsString();
+            if (identifier != null) {
+                return new GenericDomainEventMessage<>(getType(), getAggregateIdentifier(), getSequenceNumber(),
+                                                       getPayload(), getMetaData(), getIdentifier(), getTimestamp());
+            } else {
+                return new LazyIdentifierDomainEventMessage<>(getType(), getSequenceNumber(), getPayload(),
+                                                              MetaData.from(newMetaData));
+            }
+        }
+
+        @Override
+        public GenericDomainEventMessage<P> andMetaData(Map<String, ?> additionalMetaData) {
+            String identifier = identifierAsString();
+            if (identifier != null) {
+                return new GenericDomainEventMessage<>(getType(), getAggregateIdentifier(), getSequenceNumber(),
+                                                       getPayload(), getMetaData(), getIdentifier(), getTimestamp())
+                        .andMetaData(additionalMetaData);
+            } else {
+                return new LazyIdentifierDomainEventMessage<>(getType(), getSequenceNumber(), getPayload(),
+                                                              getMetaData().mergedWith(additionalMetaData));
+            }
+        }
+    }
 }

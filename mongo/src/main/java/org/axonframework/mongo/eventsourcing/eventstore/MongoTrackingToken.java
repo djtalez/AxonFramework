@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,12 +16,19 @@
 
 package org.axonframework.mongo.eventsourcing.eventstore;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import org.axonframework.common.Assert;
 import org.axonframework.eventsourcing.eventstore.TrackingToken;
 
+import java.io.Serializable;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 
+import static java.lang.Math.max;
+import static java.lang.Math.min;
 import static java.util.Collections.unmodifiableSet;
 
 /**
@@ -33,10 +41,15 @@ import static java.util.Collections.unmodifiableSet;
  *
  * @author Rene de Waele
  */
-public class MongoTrackingToken implements TrackingToken {
+public class MongoTrackingToken implements TrackingToken, Serializable {
 
     private final long timestamp;
     private final Map<String, Long> trackedEvents;
+
+    private MongoTrackingToken(long timestamp, Map<String, Long> trackedEvents) {
+        this.timestamp = timestamp;
+        this.trackedEvents = trackedEvents;
+    }
 
     /**
      * Returns a new instance of a {@link MongoTrackingToken} with given {@code timestamp}, {@code eventIdentifier} and
@@ -51,9 +64,19 @@ public class MongoTrackingToken implements TrackingToken {
                                       Collections.singletonMap(eventIdentifier, timestamp.toEpochMilli()));
     }
 
-    private MongoTrackingToken(long timestamp, Map<String, Long> trackedEvents) {
-        this.timestamp = timestamp;
-        this.trackedEvents = trackedEvents;
+    /**
+     * Returns a new instance of {@link MongoTrackingToken} with given {@code timestamp} and given {@code
+     * trackedEvents}.
+     *
+     * @param timestamp     the event's timestamp
+     * @param trackedEvents the map of tracked events where the key is the event identifier and the value is the
+     *                      timestamp
+     * @return Mongo tracking token instance
+     */
+    @JsonCreator
+    public static MongoTrackingToken of(@JsonProperty("timestamp") Instant timestamp,
+                                        @JsonProperty("trackedEvents") Map<String, Long> trackedEvents) {
+        return new MongoTrackingToken(timestamp.toEpochMilli(), trackedEvents);
     }
 
     /**
@@ -103,12 +126,22 @@ public class MongoTrackingToken implements TrackingToken {
     }
 
     /**
+     * Gets tracked events. The key is the event identifier, and the value is the timestamp.
+     *
+     * @return tracked events
+     */
+    public Map<String, Long> getTrackedEvents() {
+        return Collections.unmodifiableMap(trackedEvents);
+    }
+
+    /**
      * Returns an {@link Iterable} with all known identifiers of events tracked before and including this token. Note,
      * the token only stores ids of prior events if they are not too old, see
      * {@link #advanceTo(Instant, String, Duration)}.
      *
      * @return all known event identifiers
      */
+    @JsonIgnore
     public Set<String> getKnownEventIds() {
         return unmodifiableSet(trackedEvents.keySet());
     }
@@ -133,5 +166,40 @@ public class MongoTrackingToken implements TrackingToken {
     @Override
     public String toString() {
         return "MongoTrackingToken{" + "timestamp=" + timestamp + ", trackedEvents=" + trackedEvents + '}';
+    }
+
+    @Override
+    public TrackingToken lowerBound(TrackingToken other) {
+        Assert.isTrue(other instanceof MongoTrackingToken, () -> "Incompatible token type provided.");
+        MongoTrackingToken otherToken = (MongoTrackingToken) other;
+
+        Map<String, Long> intersection = new HashMap<>(this.trackedEvents);
+        trackedEvents.keySet().forEach(k -> {
+            if (!otherToken.trackedEvents.containsKey(k)) {
+                intersection.remove(k);
+            }
+        });
+        return new MongoTrackingToken(min(timestamp, otherToken.timestamp), intersection);
+    }
+
+    @Override
+    public TrackingToken upperBound(TrackingToken other) {
+        Assert.isTrue(other instanceof MongoTrackingToken, () -> "Incompatible token type provided.");
+        Long timestamp = max(((MongoTrackingToken)other).timestamp, this.timestamp);
+        Map<String, Long> events = new HashMap<>(trackedEvents);
+        events.putAll(((MongoTrackingToken) other).trackedEvents);
+        return new MongoTrackingToken(timestamp, events);
+    }
+
+    @Override
+    public boolean covers(TrackingToken other) {
+        Assert.isTrue(other instanceof MongoTrackingToken, () -> "Incompatible token type provided.");
+        MongoTrackingToken otherToken = (MongoTrackingToken) other;
+
+        long oldest = this.trackedEvents.values().stream().min(Comparator.naturalOrder()).orElse(0L);
+        return otherToken.timestamp <= this.timestamp
+                && otherToken.trackedEvents.keySet().stream()
+                                           .allMatch(k -> this.trackedEvents.containsKey(k) ||
+                                                   otherToken.trackedEvents.get(k) < oldest);
     }
 }

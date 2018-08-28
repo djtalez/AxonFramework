@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2017. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,10 @@ package org.axonframework.mongo.eventsourcing.eventstore;
 import com.mongodb.BasicDBObject;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.FindOneAndReplaceOptions;
 import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.Sorts;
 import org.axonframework.common.Assert;
 import org.axonframework.eventhandling.EventMessage;
 import org.axonframework.eventsourcing.DomainEventMessage;
@@ -37,6 +39,7 @@ import org.bson.Document;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -45,6 +48,8 @@ import java.util.stream.Stream;
 
 import static com.mongodb.client.model.Filters.*;
 import static java.util.stream.StreamSupport.stream;
+import static org.axonframework.common.DateTimeUtils.formatInstant;
+import static org.axonframework.common.DateTimeUtils.parseInstant;
 import static org.axonframework.common.ObjectUtils.getOrDefault;
 
 /**
@@ -134,7 +139,7 @@ public abstract class AbstractMongoEventStorageStrategy implements StorageStrate
                 .sort(new BasicDBObject(eventConfiguration().sequenceNumberProperty(), ORDER_ASC));
         cursor = cursor.batchSize(batchSize);
         return stream(cursor.spliterator(), false).flatMap(this::extractEvents)
-                .filter(event -> event.getSequenceNumber() >= firstSequenceNumber).collect(Collectors.toList());
+                                                  .filter(event -> event.getSequenceNumber() >= firstSequenceNumber).collect(Collectors.toList());
     }
 
     /**
@@ -156,16 +161,17 @@ public abstract class AbstractMongoEventStorageStrategy implements StorageStrate
                           () -> String.format("Token %s is of the wrong type", lastToken));
             MongoTrackingToken trackingToken = (MongoTrackingToken) lastToken;
             cursor = eventCollection.find(and(gte(eventConfiguration.timestampProperty(),
-                                                  trackingToken.getTimestamp().minus(lookBackTime).toString()),
+                                                  formatInstant(trackingToken.getTimestamp().minus(lookBackTime))),
                                               nin(eventConfiguration.eventIdentifierProperty(),
                                                   trackingToken.getKnownEventIds())));
         }
         cursor = cursor.sort(new BasicDBObject(eventConfiguration().timestampProperty(), ORDER_ASC)
                                      .append(eventConfiguration().sequenceNumberProperty(), ORDER_ASC));
-        cursor = cursor.limit(batchSize);
+        cursor = cursor.batchSize(batchSize);
         AtomicReference<MongoTrackingToken> previousToken = new AtomicReference<>((MongoTrackingToken) lastToken);
         List<TrackedEventData<?>> results = new ArrayList<>();
-        for (Document document : cursor) {
+        for (MongoCursor<Document> iterator = cursor.iterator(); results.size() < batchSize && iterator.hasNext(); ) {
+            Document document = iterator.next();
             extractEvents(document)
                     .filter(ed -> previousToken.get() == null || !previousToken.get().getKnownEventIds().contains(ed.getEventIdentifier()))
                     .map(event -> new TrackedMongoEventEntry<>(event, previousToken.updateAndGet(
@@ -182,8 +188,28 @@ public abstract class AbstractMongoEventStorageStrategy implements StorageStrate
                                                                    String aggregateIdentifier) {
         FindIterable<Document> cursor =
                 snapshotCollection.find(eq(eventConfiguration.aggregateIdentifierProperty(), aggregateIdentifier))
-                        .sort(new BasicDBObject(eventConfiguration.sequenceNumberProperty(), ORDER_DESC)).limit(1);
+                                  .sort(new BasicDBObject(eventConfiguration.sequenceNumberProperty(), ORDER_DESC)).limit(1);
         return stream(cursor.spliterator(), false).findFirst().map(this::extractSnapshot);
+    }
+
+    @Override
+    public Optional<Long> lastSequenceNumberFor(MongoCollection<Document> eventsCollection, String aggregateIdentifier) {
+        Document lastDocument = eventsCollection.find(eq(eventConfiguration.aggregateIdentifierProperty(), aggregateIdentifier))
+                                                .sort(Sorts.descending(eventConfiguration.sequenceNumberProperty()))
+                                                .first();
+        return Optional.ofNullable(lastDocument).map(this::extractHighestSequenceNumber);
+    }
+
+    @Override
+    public TrackingToken createTailToken(MongoCollection<Document> eventsCollection) {
+        Document first = eventsCollection.find()
+                                         .sort(Sorts.ascending(eventConfiguration.timestampProperty()))
+                                         .first();
+        return Optional.ofNullable(first)
+                       .map(d -> d.get(eventConfiguration.timestampProperty()))
+                       .map(t -> parseInstant((String) t))
+                       .map(t -> MongoTrackingToken.of(t, Collections.emptyMap()))
+                       .orElse(null);
     }
 
     /**
@@ -193,6 +219,19 @@ public abstract class AbstractMongoEventStorageStrategy implements StorageStrate
      * @return snapshot data contained in given document
      */
     protected abstract DomainEventData<?> extractSnapshot(Document object);
+
+    /**
+     * Extract the highest sequence number known from the entry represented by the given {@code document}.
+     * <p>
+     * This implementation takes the {@code sequenceNumberProperty} defined in the {@code eventConfiguration}.
+     * Implementations that allow storage of multiple events in a single document should override this method.
+     *
+     * @param document The document representing the entry stored in Mongo
+     * @return a Long representing the highest sequence number found
+     */
+    protected Long extractHighestSequenceNumber(Document document) {
+        return (Long) document.get(eventConfiguration.sequenceNumberProperty());
+    }
 
     @Override
     public void ensureIndexes(MongoCollection<Document> eventsCollection,

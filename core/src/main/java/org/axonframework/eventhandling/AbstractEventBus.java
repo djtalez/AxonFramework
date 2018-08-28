@@ -34,6 +34,7 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 import static org.axonframework.messaging.unitofwork.UnitOfWork.Phase.*;
 
@@ -56,7 +57,7 @@ public abstract class AbstractEventBus implements EventBus {
     private final String eventsKey = this + "_EVENTS";
     private final MessageMonitor<? super EventMessage<?>> messageMonitor;
     private final Set<Consumer<List<? extends EventMessage<?>>>> eventProcessors = new CopyOnWriteArraySet<>();
-    private final Set<MessageDispatchInterceptor<EventMessage<?>>> dispatchInterceptors = new CopyOnWriteArraySet<>();
+    private final Set<MessageDispatchInterceptor<? super EventMessage<?>>> dispatchInterceptors = new CopyOnWriteArraySet<>();
 
     /**
      * Initializes an event bus with a {@link NoOpMessageMonitor}.
@@ -106,29 +107,38 @@ public abstract class AbstractEventBus implements EventBus {
      * @param dispatchInterceptor
      */
     @Override
-    public Registration registerDispatchInterceptor(MessageDispatchInterceptor<EventMessage<?>> dispatchInterceptor) {
+    public Registration registerDispatchInterceptor(MessageDispatchInterceptor<? super EventMessage<?>> dispatchInterceptor) {
         dispatchInterceptors.add(dispatchInterceptor);
         return () -> dispatchInterceptors.remove(dispatchInterceptor);
     }
 
     @Override
     public void publish(List<? extends EventMessage<?>> events) {
+        Stream<MessageMonitor.MonitorCallback> ingested = events.stream().map(messageMonitor::onMessageIngested);
+
         if (CurrentUnitOfWork.isStarted()) {
             UnitOfWork<?> unitOfWork = CurrentUnitOfWork.get();
             Assert.state(!unitOfWork.phase().isAfter(PREPARE_COMMIT),
                          () -> "It is not allowed to publish events when the current Unit of Work has already been " +
-                                 "committed. " +
-                                 "Please start a new Unit of Work before publishing events.");
+                               "committed. Please start a new Unit of Work before publishing events.");
             Assert.state(!unitOfWork.root().phase().isAfter(PREPARE_COMMIT),
                          () -> "It is not allowed to publish events when the root Unit of Work has already been " +
-                                 "committed.");
+                               "committed.");
+
+            unitOfWork.afterCommit(u -> ingested.forEach(MessageMonitor.MonitorCallback::reportSuccess));
+            unitOfWork.onRollback(u -> ingested.forEach(m -> m.reportFailure(u.getExecutionResult().getExceptionResult())));
 
             eventsQueue(unitOfWork).addAll(events);
-
         } else {
-            prepareCommit(intercept(events));
-            commit(events);
-            afterCommit(events);
+            try {
+                prepareCommit(intercept(events));
+                commit(events);
+                afterCommit(events);
+                ingested.forEach(MessageMonitor.MonitorCallback::reportSuccess);
+            } catch (Exception e) {
+                ingested.forEach(m -> m.reportFailure(e));
+                throw e;
+            }
         }
     }
 
@@ -183,7 +193,7 @@ public abstract class AbstractEventBus implements EventBus {
         }
         List<EventMessage<?>> messages = new ArrayList<>();
         for (UnitOfWork<?> uow = CurrentUnitOfWork.get(); uow != null; uow = uow.parent().orElse(null)) {
-            messages.addAll(uow.getOrDefaultResource(eventsKey, Collections.emptyList()));
+            messages.addAll(0, uow.getOrDefaultResource(eventsKey, Collections.emptyList()));
         }
         return messages;
     }
@@ -196,10 +206,10 @@ public abstract class AbstractEventBus implements EventBus {
      */
     protected List<? extends EventMessage<?>> intercept(List<? extends EventMessage<?>> events) {
         List<EventMessage<?>> preprocessedEvents = new ArrayList<>(events);
-        for (MessageDispatchInterceptor<EventMessage<?>> preprocessor : dispatchInterceptors) {
-            BiFunction<Integer, EventMessage<?>, EventMessage<?>> function = preprocessor.handle(preprocessedEvents);
+        for (MessageDispatchInterceptor<? super EventMessage<?>> preprocessor : dispatchInterceptors) {
+            BiFunction<Integer, ? super EventMessage<?>, ? super EventMessage<?>> function = preprocessor.handle(preprocessedEvents);
             for (int i = 0; i < preprocessedEvents.size(); i++) {
-                preprocessedEvents.set(i, function.apply(i, preprocessedEvents.get(i)));
+                preprocessedEvents.set(i, (EventMessage<?>) function.apply(i, preprocessedEvents.get(i)));
             }
         }
         return preprocessedEvents;
@@ -218,7 +228,6 @@ public abstract class AbstractEventBus implements EventBus {
      * @param events Events to be published by this Event Bus
      */
     protected void prepareCommit(List<? extends EventMessage<?>> events) {
-        events.forEach(messageMonitor::onMessageIngested);
         eventProcessors.forEach(eventProcessor -> eventProcessor.accept(events));
     }
 

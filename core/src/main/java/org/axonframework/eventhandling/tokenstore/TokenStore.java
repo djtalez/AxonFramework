@@ -1,9 +1,12 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2017. Axon Framework
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,6 +28,50 @@ import org.axonframework.eventsourcing.eventstore.TrackingToken;
  * @author Allard Buijze
  */
 public interface TokenStore {
+
+    /**
+     * Initializes the given {@code segmentCount} number of segments for the given {@code processorName} to track its
+     * tokens. This method should only be invoked when no tokens have been stored for the given processor, yet.
+     * <p>
+     * This method will initialize the tokens, but not claim them. It will create the segments ranging from {@code 0}
+     * until {@code segmentCount - 1}.
+     * <p>
+     * The exact behavior when this method is called while tokens were already present, is undefined in case the token
+     * already present is not owned by the initializing process.
+     *
+     * @param processorName The name of the processor to initialize segments for
+     * @param segmentCount  The number of segments to initialize
+     * @throws UnableToClaimTokenException when a segment has already been created
+     */
+    default void initializeTokenSegments(String processorName, int segmentCount) throws UnableToClaimTokenException {
+        for (int segment = 0; segment < segmentCount; segment++) {
+            fetchToken(processorName, segment);
+            releaseClaim(processorName, segment);
+        }
+    }
+
+    /**
+     * Initializes the given {@code segmentCount} number of segments for the given {@code processorName} to track its
+     * tokens. This method should only be invoked when no tokens have been stored for the given processor, yet.
+     * <p>
+     * This method will store {@code initialToken} for all segments as starting point for processor, but not claim them.
+     * It will create the segments ranging from {@code 0} until {@code segmentCount - 1}.
+     * <p>
+     * The exact behavior when this method is called while tokens were already present, is undefined in case the token
+     * already present is not owned by the initializing process.
+     *
+     * @param processorName The name of the processor to initialize segments for
+     * @param segmentCount  The number of segments to initialize
+     * @param initialToken  The initial token which is used as a starting point for processor
+     * @throws UnableToClaimTokenException when a segment has already been created
+     */
+    default void initializeTokenSegments(String processorName, int segmentCount, TrackingToken initialToken)
+            throws UnableToClaimTokenException {
+        for (int segment = 0; segment < segmentCount; segment++) {
+            storeToken(initialToken, processorName, segment);
+            releaseClaim(processorName, segment);
+        }
+    }
 
     /**
      * Stores the given {@code token} in the store. The token marks the current position of the process with given
@@ -81,4 +128,16 @@ public interface TokenStore {
      * @param segment       the segment for which a token was obtained
      */
     void releaseClaim(String processorName, int segment);
+
+
+    /**
+     * Returns an array of known {@code segments} for a given {@code processorName}.
+     * <p>
+     * The segments returned are segments for which a token has been stored previously. When the {@link TokenStore} is
+     * empty, an empty array is returned.
+     *
+     * @param processorName The process name for which to fetch the segments
+     * @return an array of segment identifiers.
+     */
+    int[] fetchSegments(String processorName);
 }

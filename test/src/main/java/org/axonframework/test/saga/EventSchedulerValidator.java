@@ -27,8 +27,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
+import static org.axonframework.common.DateTimeUtils.formatInstant;
+
 /**
- * Helper class for validating evets scheduled in a given event scheduler.
+ * Helper class for validating events scheduled in a given event scheduler.
  *
  * @author Allard Buijze
  * @since 1.1
@@ -90,7 +92,7 @@ public class EventSchedulerValidator {
             description.appendText("\n<")
                     .appendText(item.getEvent().toString())
                     .appendText("> at <")
-                    .appendText(item.getScheduleTime().toString())
+                    .appendText(formatInstant(item.getScheduleTime()))
                     .appendText(">");
         }
     }

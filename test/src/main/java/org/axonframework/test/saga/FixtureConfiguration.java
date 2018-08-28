@@ -16,6 +16,7 @@
 
 package org.axonframework.test.saga;
 
+import org.axonframework.messaging.annotation.HandlerDefinition;
 import org.axonframework.test.FixtureExecutionException;
 import org.axonframework.test.aggregate.ResultValidator;
 import org.axonframework.test.matchers.FieldFilter;
@@ -117,6 +118,15 @@ public interface FixtureConfiguration {
     FixtureConfiguration registerIgnoredField(Class<?> declaringClass, String fieldName);
 
     /**
+     * Registers handler definition within this fixture. This {@code handlerDefinition} will replace existing one within
+     * this fixture.
+     *
+     * @param handlerDefinition used to create concrete handlers
+     * @return the current FixtureConfiguration, for fluent interfacing
+     */
+    FixtureConfiguration registerHandlerDefinition(HandlerDefinition handlerDefinition);
+
+    /**
      * Sets the instance that defines the behavior of the Command Bus when a command is dispatched with a callback.
      *
      * @param callbackBehavior The instance deciding to how the callback should be invoked.
@@ -133,6 +143,15 @@ public interface FixtureConfiguration {
      * @return an object that allows registration of the actual events to send
      */
     GivenAggregateEventPublisher givenAggregate(String aggregateIdentifier);
+
+    /**
+     * Use this method to indicate a specific moment as the initial current time "known" by the fixture at the start
+     * of the given state.
+     *
+     * @param currentTime The simulated "current time" at which the given state is initialized
+     * @return an object that allows chaining of more given state
+     */
+    ContinuedGivenState givenCurrentTime(Instant currentTime);
 
     /**
      * Indicates that the given {@code applicationEvent} has been published in the past. This event is sent to the

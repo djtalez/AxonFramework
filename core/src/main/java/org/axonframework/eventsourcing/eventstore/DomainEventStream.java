@@ -16,6 +16,7 @@ package org.axonframework.eventsourcing.eventstore;
 import org.axonframework.eventsourcing.DomainEventMessage;
 
 import java.util.*;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -136,29 +137,20 @@ public interface DomainEventStream extends Iterator<DomainEventMessage<?>> {
     static DomainEventStream concat(DomainEventStream a, DomainEventStream b) {
         Objects.requireNonNull(a);
         Objects.requireNonNull(b);
-        return new DomainEventStream() {
-            @Override
-            public DomainEventMessage<?> peek() {
-                return a.hasNext() ? a.peek() : b.peek();
-            }
-
-            @Override
-            public boolean hasNext() {
-                return a.hasNext() || b.hasNext();
-            }
-
-            @Override
-            public DomainEventMessage<?> next() {
-                return a.hasNext() ? a.next() : b.next();
-            }
-
-            @Override
-            public Long getLastSequenceNumber() {
-                return b.getLastSequenceNumber() == null ? a.getLastSequenceNumber() : b.getLastSequenceNumber();
-            }
-        };
+        return new ConcatenatingDomainEventStream(a, b);
     }
 
+    /**
+     * Returns a stream that provides the items of this stream that match the given {@code filter}.
+     *
+     * @param filter The filter to apply to the stream
+     * @return A filtered version of this stream 
+     */
+    default DomainEventStream filter(Predicate<? super DomainEventMessage<?>> filter) {
+        Objects.requireNonNull(filter);
+        return new FilteringDomainEventStream(this, filter);
+    }
+    
     /**
      * Returns {@code true} if the stream has more events, meaning that a call to {@code next()} will not
      * result in an exception. If a call to this method returns {@code false}, there is no guarantee about the

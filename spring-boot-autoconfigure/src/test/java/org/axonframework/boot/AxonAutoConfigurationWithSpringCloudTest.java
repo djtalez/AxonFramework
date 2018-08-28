@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2017. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -17,15 +17,13 @@ package org.axonframework.boot;
 
 import org.axonframework.commandhandling.CommandBus;
 import org.axonframework.commandhandling.SimpleCommandBus;
-import org.axonframework.commandhandling.distributed.CommandBusConnector;
-import org.axonframework.commandhandling.distributed.CommandRouter;
-import org.axonframework.commandhandling.distributed.DistributedCommandBus;
+import org.axonframework.commandhandling.distributed.*;
 import org.axonframework.commandhandling.gateway.AbstractCommandGateway;
 import org.axonframework.commandhandling.gateway.CommandGateway;
 import org.axonframework.commandhandling.gateway.DefaultCommandGateway;
 import org.axonframework.eventhandling.EventBus;
 import org.axonframework.serialization.Serializer;
-import org.axonframework.springcloud.commandhandling.SpringCloudCommandRouter;
+import org.axonframework.springcloud.commandhandling.SpringCloudHttpBackupCommandRouter;
 import org.axonframework.springcloud.commandhandling.SpringHttpCommandBusConnector;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -35,10 +33,11 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.autoconfigure.jmx.JmxAutoConfiguration;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
-import org.springframework.boot.autoconfigure.web.WebClientAutoConfiguration;
-import org.springframework.cloud.client.DefaultServiceInstance;
+import org.springframework.boot.autoconfigure.web.reactive.function.client.WebClientAutoConfiguration;
 import org.springframework.cloud.client.discovery.DiscoveryClient;
-import org.springframework.cloud.client.discovery.noop.NoopDiscoveryClient;
+import org.springframework.cloud.client.discovery.simple.SimpleDiscoveryClient;
+import org.springframework.cloud.client.discovery.simple.SimpleDiscoveryProperties;
+import org.springframework.cloud.client.serviceregistry.Registration;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -46,13 +45,21 @@ import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
+
+import java.net.URI;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.mock;
 
 
 @ContextConfiguration(classes = AxonAutoConfigurationWithSpringCloudTest.TestContext.class)
-@EnableAutoConfiguration(exclude = {JmxAutoConfiguration.class, WebClientAutoConfiguration.class, HibernateJpaAutoConfiguration.class, DataSourceAutoConfiguration.class})
+@EnableAutoConfiguration(exclude = {JmxAutoConfiguration.class,
+        WebClientAutoConfiguration.class,
+        HibernateJpaAutoConfiguration.class,
+        DataSourceAutoConfiguration.class})
 @TestPropertySource("classpath:test.springcloud.application.properties")
 @RunWith(SpringRunner.class)
 public class AxonAutoConfigurationWithSpringCloudTest {
@@ -68,16 +75,22 @@ public class AxonAutoConfigurationWithSpringCloudTest {
     private CommandBus commandBus;
 
     @Autowired
+    private RoutingStrategy routingStrategy;
+
+    @Autowired
     private CommandRouter commandRouter;
     @Autowired
     private CommandBusConnector commandBusConnector;
 
     @Test
-    public void testContextInitialization() throws Exception {
+    public void testContextInitialization() {
         assertNotNull(applicationContext);
 
-        assertNotNull(applicationContext.getBean(SpringCloudCommandRouter.class));
-        assertEquals(SpringCloudCommandRouter.class, commandRouter.getClass());
+        assertNotNull(applicationContext.getBean(RoutingStrategy.class));
+        assertEquals(AnnotationRoutingStrategy.class, routingStrategy.getClass());
+
+        assertNotNull(applicationContext.getBean(SpringCloudHttpBackupCommandRouter.class));
+        assertEquals(SpringCloudHttpBackupCommandRouter.class, commandRouter.getClass());
 
         assertNotNull(applicationContext.getBean(SpringHttpCommandBusConnector.class));
         assertEquals(SpringHttpCommandBusConnector.class, commandBusConnector.getClass());
@@ -108,9 +121,45 @@ public class AxonAutoConfigurationWithSpringCloudTest {
 
         @Bean
         public DiscoveryClient discoveryClient() {
-            return new NoopDiscoveryClient(new DefaultServiceInstance("TestServiceId", "localhost", 12345, true));
+            return new SimpleDiscoveryClient(new SimpleDiscoveryProperties());
         }
 
-    }
+        @Bean
+        public Registration registration() {
+            return new Registration() {
+                @Override
+                public String getServiceId() {
+                    return "TestServiceId";
+                }
 
+                @Override
+                public String getHost() {
+                    return "localhost";
+                }
+
+                @Override
+                public int getPort() {
+                    return 12345;
+                }
+
+                @Override
+                public boolean isSecure() {
+                    return true;
+                }
+
+                @Override
+                public URI getUri() {
+                    return UriComponentsBuilder.fromUriString("localhost")
+                                               .port(12345)
+                                               .build()
+                                               .toUri();
+                }
+
+                @Override
+                public Map<String, String> getMetadata() {
+                    return new HashMap<>();
+                }
+            };
+        }
+    }
 }

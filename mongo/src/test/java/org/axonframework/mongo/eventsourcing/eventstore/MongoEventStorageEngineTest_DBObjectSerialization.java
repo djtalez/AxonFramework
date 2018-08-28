@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
- *
+ * Copyright (c) 2010-2017. Axon Framework
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -22,14 +21,13 @@ import de.flapdoodle.embed.mongo.MongodExecutable;
 import de.flapdoodle.embed.mongo.MongodProcess;
 import org.axonframework.common.jdbc.PersistenceExceptionResolver;
 import org.axonframework.eventsourcing.eventstore.AbstractEventStorageEngine;
-import org.axonframework.eventsourcing.eventstore.BatchingEventStorageEngineTest;
 import org.axonframework.mongo.eventsourcing.eventstore.documentperevent.DocumentPerEventStorageStrategy;
 import org.axonframework.mongo.utils.MongoLauncher;
 import org.axonframework.serialization.Serializer;
 import org.axonframework.serialization.upcasting.event.EventUpcaster;
 import org.axonframework.serialization.upcasting.event.NoOpEventUpcaster;
 import org.junit.*;
-import org.junit.runner.RunWith;
+import org.junit.runner.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,8 +43,10 @@ import java.io.IOException;
  */
 @RunWith(SpringJUnit4ClassRunner.class)
 @ContextConfiguration(locations = {"classpath:META-INF/spring/mongo-context_dbobject.xml"})
-public class MongoEventStorageEngineTest_DBObjectSerialization extends BatchingEventStorageEngineTest {
-    private static final Logger logger = LoggerFactory.getLogger(MongoEventStorageEngineTest_DBObjectSerialization.class);
+public class MongoEventStorageEngineTest_DBObjectSerialization extends AbstractMongoEventStorageEngineTest {
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(MongoEventStorageEngineTest_DBObjectSerialization.class);
 
     private static MongodExecutable mongoExe;
     private static MongodProcess mongod;
@@ -74,6 +74,7 @@ public class MongoEventStorageEngineTest_DBObjectSerialization extends BatchingE
 
     private DefaultMongoTemplate mongoTemplate;
 
+    @SuppressWarnings("Duplicates")
     @Before
     public void setUp() {
         MongoClient mongoClient = null;
@@ -110,8 +111,7 @@ public class MongoEventStorageEngineTest_DBObjectSerialization extends BatchingE
     @Override
     protected AbstractEventStorageEngine createEngine(PersistenceExceptionResolver persistenceExceptionResolver) {
         Serializer serializer = context.getBean(Serializer.class);
-        return new MongoEventStorageEngine(serializer, NoOpEventUpcaster.INSTANCE,
-                                           persistenceExceptionResolver, 100, mongoTemplate,
-                                           new DocumentPerEventStorageStrategy());
+        return new MongoEventStorageEngine(serializer, NoOpEventUpcaster.INSTANCE, persistenceExceptionResolver,
+                                           serializer, 100, mongoTemplate, new DocumentPerEventStorageStrategy());
     }
 }
