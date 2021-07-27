@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2010-2018. Axon Framework
+ * Copyright (c) 2010-2020. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,15 +19,17 @@ package org.axonframework.spring.config;
 import org.axonframework.commandhandling.CommandBus;
 import org.axonframework.commandhandling.gateway.CommandGateway;
 import org.axonframework.commandhandling.gateway.DefaultCommandGateway;
-import org.axonframework.commandhandling.model.Repository;
 import org.axonframework.config.Configuration;
 import org.axonframework.config.Configurer;
+import org.axonframework.config.EventProcessingConfiguration;
+import org.axonframework.config.LifecycleHandler;
 import org.axonframework.config.ModuleConfiguration;
 import org.axonframework.eventhandling.EventBus;
-import org.axonframework.eventhandling.saga.ResourceInjector;
 import org.axonframework.messaging.Message;
 import org.axonframework.messaging.annotation.HandlerDefinition;
 import org.axonframework.messaging.correlation.CorrelationDataProvider;
+import org.axonframework.modelling.command.Repository;
+import org.axonframework.modelling.saga.ResourceInjector;
 import org.axonframework.monitoring.MessageMonitor;
 import org.axonframework.queryhandling.DefaultQueryGateway;
 import org.axonframework.queryhandling.QueryBus;
@@ -41,7 +43,6 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Primary;
 
 import java.util.List;
 import java.util.function.Supplier;
@@ -88,7 +89,6 @@ public class AxonConfiguration implements Configuration, InitializingBean, Appli
 
     @NoBeanOfType(QueryBus.class)
     @Bean("queryBus")
-    @Primary
     public QueryBus defaultQueryBus() {
         return config.queryBus();
     }
@@ -116,6 +116,11 @@ public class AxonConfiguration implements Configuration, InitializingBean, Appli
         return config.resourceInjector();
     }
 
+    @Override
+    public EventProcessingConfiguration eventProcessingConfiguration() {
+        return config.eventProcessingConfiguration();
+    }
+
     /**
      * Returns the CommandGateway used to send commands to command handlers.
      *
@@ -125,13 +130,13 @@ public class AxonConfiguration implements Configuration, InitializingBean, Appli
     @NoBeanOfType(CommandGateway.class)
     @Bean
     public CommandGateway commandGateway(CommandBus commandBus) {
-        return new DefaultCommandGateway(commandBus);
+        return DefaultCommandGateway.builder().commandBus(commandBus).build();
     }
 
     @NoBeanOfType(QueryGateway.class)
     @Bean
     public QueryGateway queryGateway(QueryBus queryBus) {
-        return new DefaultQueryGateway(queryBus);
+        return DefaultQueryGateway.builder().queryBus(queryBus).build();
     }
 
     @Override
@@ -180,12 +185,12 @@ public class AxonConfiguration implements Configuration, InitializingBean, Appli
     }
 
     @Override
-    public void onStart(int phase, Runnable startHandler) {
+    public void onStart(int phase, LifecycleHandler startHandler) {
         config.onStart(phase, startHandler);
     }
 
     @Override
-    public void onShutdown(int phase, Runnable shutdownHandler) {
+    public void onShutdown(int phase, LifecycleHandler shutdownHandler) {
         config.onShutdown(phase, shutdownHandler);
     }
 

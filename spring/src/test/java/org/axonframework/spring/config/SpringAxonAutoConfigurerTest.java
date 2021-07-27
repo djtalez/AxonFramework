@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2010-2018. Axon Framework
+ * Copyright (c) 2010-2020. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,29 +19,23 @@ package org.axonframework.spring.config;
 import org.axonframework.commandhandling.AsynchronousCommandBus;
 import org.axonframework.commandhandling.CommandBus;
 import org.axonframework.commandhandling.CommandHandler;
-import org.axonframework.commandhandling.CommandTargetResolver;
+import org.axonframework.commandhandling.MethodCommandHandlerDefinition;
 import org.axonframework.commandhandling.SimpleCommandBus;
-import org.axonframework.commandhandling.TargetAggregateIdentifier;
-import org.axonframework.commandhandling.VersionedAggregateIdentifier;
 import org.axonframework.commandhandling.callbacks.FutureCallback;
-import org.axonframework.commandhandling.model.AggregateIdentifier;
+import org.axonframework.common.caching.Cache;
 import org.axonframework.config.EventProcessingConfiguration;
-import org.axonframework.commandhandling.model.inspection.MethodCommandHandlerDefinition;
-import org.axonframework.commandhandling.model.inspection.MethodCommandHandlerInterceptorDefinition;
-import org.axonframework.config.SagaConfiguration;
+import org.axonframework.config.EventProcessingConfigurer;
+import org.axonframework.config.EventProcessingModule;
+import org.axonframework.config.TagsConfiguration;
+import org.axonframework.deadline.annotation.DeadlineMethodMessageHandlerDefinition;
 import org.axonframework.eventhandling.EventBus;
 import org.axonframework.eventhandling.EventHandler;
-import org.axonframework.eventhandling.EventListener;
 import org.axonframework.eventhandling.EventMessage;
+import org.axonframework.eventhandling.EventMessageHandler;
 import org.axonframework.eventhandling.ListenerInvocationErrorHandler;
-import org.axonframework.deadline.annotation.DeadlineMethodMessageHandlerDefinition;
 import org.axonframework.eventhandling.replay.ReplayAwareMessageHandlerWrapper;
-import org.axonframework.eventhandling.saga.AssociationValue;
-import org.axonframework.eventhandling.saga.SagaEventHandler;
-import org.axonframework.eventhandling.saga.SagaMethodMessageHandlerDefinition;
-import org.axonframework.eventhandling.saga.StartSaga;
-import org.axonframework.eventhandling.saga.repository.SagaStore;
-import org.axonframework.eventhandling.saga.repository.inmemory.InMemorySagaStore;
+import org.axonframework.eventhandling.scheduling.EventScheduler;
+import org.axonframework.eventsourcing.CachingEventSourcingRepository;
 import org.axonframework.eventsourcing.EventSourcingHandler;
 import org.axonframework.eventsourcing.eventstore.EventStorageEngine;
 import org.axonframework.eventsourcing.eventstore.EventStore;
@@ -50,10 +44,25 @@ import org.axonframework.messaging.Message;
 import org.axonframework.messaging.annotation.AnnotatedMessageHandlingMemberDefinition;
 import org.axonframework.messaging.annotation.HandlerDefinition;
 import org.axonframework.messaging.annotation.HandlerEnhancerDefinition;
+import org.axonframework.messaging.annotation.MessageHandlerInterceptorDefinition;
 import org.axonframework.messaging.annotation.MessageHandlingMember;
 import org.axonframework.messaging.annotation.MultiHandlerDefinition;
 import org.axonframework.messaging.annotation.MultiHandlerEnhancerDefinition;
 import org.axonframework.messaging.annotation.ParameterResolverFactory;
+import org.axonframework.messaging.responsetypes.ResponseTypes;
+import org.axonframework.modelling.command.AggregateIdentifier;
+import org.axonframework.modelling.command.CommandTargetResolver;
+import org.axonframework.modelling.command.TargetAggregateIdentifier;
+import org.axonframework.modelling.command.VersionedAggregateIdentifier;
+import org.axonframework.modelling.command.inspection.MethodCommandHandlerInterceptorDefinition;
+import org.axonframework.modelling.command.inspection.MethodCreationPolicyDefinition;
+import org.axonframework.modelling.saga.AssociationValue;
+import org.axonframework.modelling.saga.EndSagaMessageHandlerDefinition;
+import org.axonframework.modelling.saga.SagaEventHandler;
+import org.axonframework.modelling.saga.SagaMethodMessageHandlerDefinition;
+import org.axonframework.modelling.saga.StartSaga;
+import org.axonframework.modelling.saga.repository.SagaStore;
+import org.axonframework.modelling.saga.repository.inmemory.InMemorySagaStore;
 import org.axonframework.queryhandling.GenericSubscriptionQueryMessage;
 import org.axonframework.queryhandling.QueryBus;
 import org.axonframework.queryhandling.QueryHandler;
@@ -63,23 +72,25 @@ import org.axonframework.queryhandling.SubscriptionQueryMessage;
 import org.axonframework.queryhandling.SubscriptionQueryResult;
 import org.axonframework.queryhandling.SubscriptionQueryUpdateMessage;
 import org.axonframework.queryhandling.annotation.MethodQueryMessageHandlerDefinition;
-import org.axonframework.queryhandling.responsetypes.ResponseTypes;
 import org.axonframework.serialization.upcasting.event.EventUpcaster;
 import org.axonframework.serialization.upcasting.event.IntermediateEventRepresentation;
 import org.axonframework.spring.stereotype.Aggregate;
-import org.axonframework.spring.stereotype.Saga;
-import org.junit.*;
-import org.junit.runner.*;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.*;
+import org.mockito.internal.util.collections.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.EnableMBeanExport;
+import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Scope;
+import org.springframework.jmx.support.RegistrationPolicy;
 import org.springframework.stereotype.Component;
 import org.springframework.test.context.ContextConfiguration;
-import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
 import reactor.test.StepVerifier;
 
 import java.lang.reflect.Executable;
@@ -87,18 +98,26 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.axonframework.commandhandling.GenericCommandMessage.asCommandMessage;
-import static org.axonframework.commandhandling.model.AggregateLifecycle.apply;
 import static org.axonframework.eventhandling.GenericEventMessage.asEventMessage;
-import static org.junit.Assert.*;
-import static org.mockito.ArgumentMatchers.any;
+import static org.axonframework.modelling.command.AggregateLifecycle.apply;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-@RunWith(SpringJUnit4ClassRunner.class)
+/**
+ * Test class validating the {@link SpringAxonAutoConfigurer}.
+ *
+ * @author Allard Buijze
+ */
+@ExtendWith(SpringExtension.class)
+@EnableMBeanExport(registration = RegistrationPolicy.IGNORE_EXISTING)
 @ContextConfiguration
 public class SpringAxonAutoConfigurerTest {
 
@@ -125,6 +144,9 @@ public class SpringAxonAutoConfigurerTest {
     @Autowired(required = false)
     private EventProcessingConfiguration eventProcessingConfiguration;
 
+    @Autowired(required = false)
+    private EventProcessingConfigurer eventProcessingConfigurer;
+
     @Autowired
     private org.axonframework.config.Configuration axonConfig;
 
@@ -141,9 +163,6 @@ public class SpringAxonAutoConfigurerTest {
     private ApplicationContext applicationContext;
 
     @Autowired
-    private SagaConfiguration<Context.MySaga> mySagaConfiguration;
-
-    @Autowired
     private EventUpcaster eventUpcaster;
 
     @Autowired
@@ -151,39 +170,47 @@ public class SpringAxonAutoConfigurerTest {
     private CommandTargetResolver myCommandTargetResolver;
 
     @Autowired
+    @Qualifier("myCache")
+    private Cache myCache;
+
+    @Autowired
     @Qualifier("primaryCommandTargetResolver")
     private CommandTargetResolver primaryCommandTargetResolver;
 
+    @Autowired
+    private TagsConfiguration tagsConfiguration;
+
     @Test
-    public void contextWiresMainComponents() {
+    void contextWiresMainComponents() {
         assertNotNull(axonConfig);
         assertNotNull(axonConfig.eventBus());
         assertNotNull(eventBus);
         assertNotNull(eventStore);
         assertNotNull(commandBus);
-        assertNotNull(mySagaConfiguration);
+        assertNotNull(eventProcessingConfigurer);
         assertNotNull(eventProcessingConfiguration);
         assertEquals(eventProcessingConfiguration, axonConfig.eventProcessingConfiguration());
-        assertTrue("Expected Axon to have configured an EventStore", eventBus instanceof EventStore);
-
-        assertTrue("Expected provided commandbus implementation", commandBus instanceof AsynchronousCommandBus);
-
+        assertTrue(eventBus instanceof EventStore, "Expected Axon to have configured an EventStore");
+        assertTrue(commandBus instanceof AsynchronousCommandBus, "Expected provided CommandBus implementation");
         assertNotNull(axonConfig.repository(Context.MyAggregate.class));
+        assertNotNull(tagsConfiguration);
+        assertEquals(tagsConfiguration, axonConfig.tags());
+        assertNotNull(axonConfig.eventScheduler());
     }
 
     @Test
-    public void testEventHandlerIsRegistered() {
+    void testEventHandlerIsRegistered() {
         eventBus.publish(asEventMessage("Testing 123"));
 
-        assertNotNull("Expected EventBus to be wired", myEventHandler.eventBus);
+        assertNotNull(myEventHandler.eventBus, "Expected EventBus to be wired");
         assertTrue(myEventHandler.received.contains("Testing 123"));
         assertTrue(myOtherEventHandler.received.contains("Testing 123"));
     }
 
     @Test
-    public void testSagaIsConfigured() {
+    void testSagaIsConfigured() {
         AtomicInteger counter = new AtomicInteger();
-        eventProcessingConfiguration.registerHandlerInterceptor("MySagaProcessor", config -> (uow, chain) -> {
+        eventProcessingConfigurer.registerHandlerInterceptor("MySagaProcessor", config -> (uow, chain) -> {
             counter.incrementAndGet();
             return chain.proceed();
         });
@@ -196,7 +223,7 @@ public class SpringAxonAutoConfigurerTest {
     }
 
     @Test
-    public void testWiresCommandHandler() {
+    void testWiresCommandHandler() {
         FutureCallback<Object, Object> callback = new FutureCallback<>();
         commandBus.dispatch(asCommandMessage("test"), callback);
         callback.getResult(1, TimeUnit.SECONDS);
@@ -212,7 +239,7 @@ public class SpringAxonAutoConfigurerTest {
     }
 
     @Test
-    public void testCustomCommandTargetResolverWiring() {
+    void testCustomCommandTargetResolverWiring() {
         FutureCallback<Object, Object> callback1 = new FutureCallback<>();
         commandBus.dispatch(asCommandMessage(new Context.CreateMyOtherAggregateCommand("id")), callback1);
         callback1.getResult();
@@ -227,15 +254,15 @@ public class SpringAxonAutoConfigurerTest {
     }
 
     @Test
-    public void testListenerInvocationErrorHandler() {
+    void testListenerInvocationErrorHandler() {
         eventBus.publish(asEventMessage("Testing 123"));
 
-        assertNotNull("Expected EventBus to be wired", myEventHandler.eventBus);
+        assertNotNull(myEventHandler.eventBus, "Expected EventBus to be wired");
         assertFalse(myListenerInvocationErrorHandler.received.isEmpty());
     }
 
     @Test
-    public void testSagaInvocationErrorHandler() {
+    void testSagaInvocationErrorHandler() {
         eventBus.publish(asEventMessage(new SomeEvent("id")));
         eventBus.publish(asEventMessage(new SomeEventWhichHandlingFails("id")));
 
@@ -244,15 +271,14 @@ public class SpringAxonAutoConfigurerTest {
         assertEquals("Ooops! I failed.", myListenerInvocationErrorHandler.received.get(0).getMessage());
     }
 
-    @SuppressWarnings("unchecked")
     @Test
-    public void testWiringOfQueryHandlerAndQueryUpdateEmitter() {
+    void testWiringOfQueryHandlerAndQueryUpdateEmitter() {
         SubscriptionQueryMessage<String, List<String>, String> queryMessage = new GenericSubscriptionQueryMessage<>(
                 "axonCR",
                 ResponseTypes.multipleInstancesOf(String.class),
                 ResponseTypes.instanceOf(String.class));
 
-        SubscriptionQueryResult<QueryResponseMessage<List<String>>, SubscriptionQueryUpdateMessage<String>>result = queryBus
+        SubscriptionQueryResult<QueryResponseMessage<List<String>>, SubscriptionQueryUpdateMessage<String>> result = queryBus
                 .subscriptionQuery(queryMessage);
         eventBus.publish(asEventMessage("New chat message"));
 
@@ -265,54 +291,92 @@ public class SpringAxonAutoConfigurerTest {
     }
 
     @Test
-    public void testHandlerDefinitionAndHandlerEnhancerBeansRegistered() {
+    void testHandlerDefinitionAndHandlerEnhancerBeansRegistered() {
         MultiHandlerDefinition handlerDefinition = (MultiHandlerDefinition) axonConfig.handlerDefinition(getClass());
-        MultiHandlerEnhancerDefinition handlerEnhancerDefinition = (MultiHandlerEnhancerDefinition) handlerDefinition
-                .getHandlerEnhancerDefinition();
+        MultiHandlerEnhancerDefinition handlerEnhancerDefinition =
+                (MultiHandlerEnhancerDefinition) handlerDefinition.getHandlerEnhancerDefinition();
 
-        assertEquals(AnnotatedMessageHandlingMemberDefinition.class,
-                     handlerDefinition.getDelegates().get(0).getClass());
-        assertEquals(Context.HandlerDefinitionWithInjectedResource.class,
-                     handlerDefinition.getDelegates().get(1).getClass());
+        assertEquals(
+                AnnotatedMessageHandlingMemberDefinition.class, handlerDefinition.getDelegates().get(0).getClass()
+        );
+        assertEquals(
+                Context.HandlerDefinitionWithInjectedResource.class, handlerDefinition.getDelegates().get(1).getClass()
+        );
         assertEquals(MyHandlerDefinition.class, handlerDefinition.getDelegates().get(2).getClass());
         assertEquals(MyHandlerDefinition.class, handlerDefinition.getDelegates().get(3).getClass());
 
-        assertEquals(SagaMethodMessageHandlerDefinition.class,
-                     handlerEnhancerDefinition.getDelegates().get(0).getClass());
-        assertEquals(MethodCommandHandlerDefinition.class, handlerEnhancerDefinition.getDelegates().get(1).getClass());
-        assertEquals(MethodQueryMessageHandlerDefinition.class,
-                     handlerEnhancerDefinition.getDelegates().get(2).getClass());
-        assertEquals(ReplayAwareMessageHandlerWrapper.class,
-                     handlerEnhancerDefinition.getDelegates().get(3).getClass());
-        assertEquals(MethodCommandHandlerInterceptorDefinition.class,
-                     handlerEnhancerDefinition.getDelegates().get(4).getClass());
-        assertEquals(DeadlineMethodMessageHandlerDefinition.class,
-                     handlerEnhancerDefinition.getDelegates().get(5).getClass());
-        assertEquals(MyHandlerEnhancerDefinition.class, handlerEnhancerDefinition.getDelegates().get(6).getClass());
+        Set<Class<?>> enhancerClasses = handlerEnhancerDefinition.getDelegates()
+                                                                 .stream()
+                                                                 .map(HandlerEnhancerDefinition::getClass)
+                                                                 .collect(Collectors.toSet());
+
+        assertEquals(
+                Sets.newSet(
+                        SagaMethodMessageHandlerDefinition.class,
+                        MethodCommandHandlerInterceptorDefinition.class,
+                        MethodCommandHandlerDefinition.class,
+                        MethodCommandHandlerDefinition.class,
+                        MethodQueryMessageHandlerDefinition.class,
+                        ReplayAwareMessageHandlerWrapper.class,
+                        DeadlineMethodMessageHandlerDefinition.class,
+                        MethodCreationPolicyDefinition.class,
+                        MethodCreationPolicyDefinition.class,
+                        MyHandlerEnhancerDefinition.class,
+                        MessageHandlerInterceptorDefinition.class,
+                        EndSagaMessageHandlerDefinition.class
+                ),
+                enhancerClasses
+        );
     }
 
     @SuppressWarnings("unchecked")
     @Test
-    public void testEventUpcasterBeanPickedUp() {
+    void testEventUpcasterBeanPickedUp() {
         Stream<IntermediateEventRepresentation> representationStream = mock(Stream.class);
         axonConfig.upcasterChain().upcast(representationStream);
         verify(eventUpcaster).upcast(representationStream);
     }
 
-    @EnableAxon
+    @Test
+    public void testAggregateCaching() {
+        FutureCallback<Object, Object> callback1 = new FutureCallback<>();
+        commandBus.dispatch(asCommandMessage(new Context.CreateMyCachedAggregateCommand("id")), callback1);
+        callback1.getResult();
+        assertNotNull(axonConfig.repository(Context.MyCachedAggregate.class));
+        assertEquals(
+                CachingEventSourcingRepository.class, axonConfig.repository(Context.MyCachedAggregate.class).getClass()
+        );
+    }
+
+    @AnnotationDriven
+    @Import({SpringAxonAutoConfigurer.ImportSelector.class, AnnotationDrivenRegistrar.class})
     @Scope
     @Configuration
     public static class Context {
 
+        @Bean
+        public EventProcessingModule eventProcessingConfiguration(
+                @Qualifier("customSagaStore") SagaStore<? super MySaga> customSagaStore) {
+            EventProcessingModule eventProcessingModule = new EventProcessingModule();
+            eventProcessingModule.usingSubscribingEventProcessors()
+                                 .registerSaga(MySaga.class, sc -> sc.configureSagaStore(conf -> customSagaStore));
+            return eventProcessingModule;
+        }
+
+        @Bean
+        public TagsConfiguration tagsConfiguration() {
+            return new TagsConfiguration();
+        }
+
         @Primary
         @Bean(destroyMethod = "shutdown")
         public CommandBus commandBus() {
-            return new AsynchronousCommandBus();
+            return AsynchronousCommandBus.builder().build();
         }
 
         @Bean
         public CommandBus simpleCommandBus() {
-            return new SimpleCommandBus();
+            return SimpleCommandBus.builder().build();
         }
 
         @Bean
@@ -348,7 +412,18 @@ public class SpringAxonAutoConfigurerTest {
             return mock(CommandTargetResolver.class);
         }
 
-        @Aggregate
+        @Bean
+        public EventScheduler eventScheduler() {
+            return mock(EventScheduler.class);
+        }
+
+        @Bean
+        @Qualifier("myCache")
+        public Cache myCache() {
+            return mock(Cache.class);
+        }
+
+        @Aggregate(type = "MyCustomAggregateType", filterEventsByType = true)
         public static class MyAggregate {
 
             @AggregateIdentifier
@@ -427,6 +502,46 @@ public class SpringAxonAutoConfigurerTest {
             }
         }
 
+        public static class CreateMyCachedAggregateCommand {
+
+            @TargetAggregateIdentifier
+            private final String id;
+
+            public CreateMyCachedAggregateCommand(String id) {
+                this.id = id;
+            }
+        }
+
+        public static class MyCachedAggregateCreatedEvent {
+
+            private final String id;
+
+            public MyCachedAggregateCreatedEvent(String id) {
+                this.id = id;
+            }
+        }
+
+        @Aggregate(cache = "myCache")
+        public static class MyCachedAggregate {
+
+            @AggregateIdentifier
+            private String id;
+
+            public MyCachedAggregate() {
+                // default constructor
+            }
+
+            @CommandHandler
+            public MyCachedAggregate(CreateMyCachedAggregateCommand command) {
+                apply(new MyCachedAggregateCreatedEvent(command.id));
+            }
+
+            @EventSourcingHandler
+            public void on(MyCachedAggregateCreatedEvent event) {
+                this.id = event.id;
+            }
+        }
+
         @Component
         public static class MyCommandHandler {
 
@@ -442,7 +557,6 @@ public class SpringAxonAutoConfigurerTest {
             }
         }
 
-        @Saga
         public static class MySaga {
 
             private static List<String> events = new ArrayList<>();
@@ -520,16 +634,9 @@ public class SpringAxonAutoConfigurerTest {
             public List<Exception> received = new ArrayList<>();
 
             @Override
-            public void onError(Exception exception, EventMessage<?> event, EventListener eventListener) {
+            public void onError(Exception exception, EventMessage<?> event, EventMessageHandler eventHandler) {
                 received.add(exception);
             }
-        }
-
-        @Bean
-        public SagaConfiguration mySagaConfiguration(
-                @Qualifier("customSagaStore") SagaStore<? super MySaga> customSagaStore) {
-            return SagaConfiguration.subscribingSagaManager(MySaga.class)
-                                    .configureSagaStore(c -> customSagaStore);
         }
 
         @Bean

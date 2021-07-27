@@ -18,41 +18,53 @@ package org.axonframework.test.eventscheduler;
 
 import org.axonframework.eventhandling.EventMessage;
 import org.axonframework.eventhandling.GenericEventMessage;
-import org.junit.*;
-import org.junit.rules.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * @author Allard Buijze
  */
-public class StubEventSchedulerTest {
-
-    @Rule
-    public ExpectedException exception = ExpectedException.none();
+class StubEventSchedulerTest {
 
     private StubEventScheduler testSubject;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         testSubject = new StubEventScheduler();
     }
 
     @Test
-    public void testScheduleEvent() {
+    void testScheduleEvent() {
         testSubject.schedule(Instant.now().plus(Duration.ofDays(1)), event(new MockEvent()));
         assertEquals(1, testSubject.getScheduledItems().size());
     }
 
     @Test
-    public void testInitializeAtDateTimeAfterSchedulingEvent() {
+    void testEventContainsTimestampOfScheduledTime() {
+        Instant triggerTime = Instant.now().plusSeconds(60);
+        testSubject.schedule(triggerTime, "gone");
+        List<EventMessage<?>> triggered = new ArrayList<>();
+        testSubject.advanceTimeBy(Duration.ofMinutes(75), triggered::add);
+
+        assertEquals(1, triggered.size());
+        assertEquals(triggerTime, triggered.get(0).getTimestamp());
+    }
+
+    @Test
+    void testInitializeAtDateTimeAfterSchedulingEvent() {
         testSubject.schedule(Instant.now().plus(Duration.ofDays(1)), event(new MockEvent()));
-        exception.expect(IllegalStateException.class);
-        testSubject.initializeAt(Instant.now().minus(10, ChronoUnit.MINUTES));
+
+        assertThrows(IllegalStateException.class, () ->
+                        testSubject.initializeAt(Instant.now().minus(10, ChronoUnit.MINUTES)));
     }
 
     private EventMessage<MockEvent> event(MockEvent mockEvent) {

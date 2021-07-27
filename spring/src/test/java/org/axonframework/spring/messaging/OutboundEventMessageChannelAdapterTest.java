@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,8 +19,9 @@ package org.axonframework.spring.messaging;
 import org.axonframework.eventhandling.EventBus;
 import org.axonframework.eventhandling.EventMessage;
 import org.axonframework.eventhandling.GenericEventMessage;
-import org.junit.Before;
-import org.junit.Test;
+import org.axonframework.spring.utils.StubDomainEvent;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 
@@ -31,21 +32,21 @@ import static org.mockito.Mockito.*;
  * @author Allard Buijze
  * @author Nakul Mishra
  */
-public class OutboundEventMessageChannelAdapterTest {
+class OutboundEventMessageChannelAdapterTest {
 
     private OutboundEventMessageChannelAdapter testSubject;
     private EventBus mockEventBus;
     private MessageChannel mockChannel;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         mockEventBus = mock(EventBus.class);
         mockChannel = mock(MessageChannel.class);
         testSubject = new OutboundEventMessageChannelAdapter(mockEventBus, mockChannel);
     }
 
     @Test
-    public void testMessageForwardedToChannel() {
+    void testMessageForwardedToChannel() {
         StubDomainEvent event = new StubDomainEvent();
         testSubject.handle(singletonList(new GenericEventMessage<>(event)));
 
@@ -53,7 +54,7 @@ public class OutboundEventMessageChannelAdapterTest {
     }
 
     @Test
-    public void testEventListenerRegisteredOnInit() {
+    void testEventListenerRegisteredOnInit() {
         verify(mockEventBus, never()).subscribe(any());
         testSubject.afterPropertiesSet();
         verify(mockEventBus).subscribe(any());
@@ -61,7 +62,7 @@ public class OutboundEventMessageChannelAdapterTest {
 
     @SuppressWarnings({"unchecked"})
     @Test
-    public void testFilterBlocksEvents() {
+    void testFilterBlocksEvents() {
         testSubject = new OutboundEventMessageChannelAdapter(mockEventBus, mockChannel, m -> !m.getPayloadType().isAssignableFrom(Class.class));
         testSubject.handle(singletonList(newDomainEvent()));
         verify(mockEventBus, never()).publish(isA(EventMessage.class));

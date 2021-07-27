@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2010-2017. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,7 +17,7 @@
 package org.axonframework.spring.config;
 
 import org.axonframework.commandhandling.CommandBus;
-import org.axonframework.commandhandling.SupportedCommandNamesAware;
+import org.axonframework.commandhandling.CommandMessageHandler;
 import org.axonframework.messaging.MessageHandler;
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
@@ -24,6 +25,8 @@ import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.SmartLifecycle;
 
 import java.util.Collection;
+
+import static org.springframework.beans.factory.BeanFactoryUtils.beansOfTypeIncludingAncestors;
 
 /**
  * Registers Spring beans that implement both MessageHandler and SupportedCommandNamesAware with the command bus.
@@ -80,11 +83,11 @@ public class CommandHandlerSubscriber implements ApplicationContextAware, SmartL
             commandBus = applicationContext.getBean(CommandBus.class);
         }
         if (commandHandlers == null) {
-            commandHandlers = applicationContext.getBeansOfType(MessageHandler.class).values();
+            commandHandlers = beansOfTypeIncludingAncestors(applicationContext, MessageHandler.class).values();
         }
-        commandHandlers.stream().filter(commandHandler -> commandHandler instanceof SupportedCommandNamesAware)
+        commandHandlers.stream().filter(commandHandler -> commandHandler instanceof CommandMessageHandler)
                 .forEach(commandHandler -> {
-                    for (String commandName : ((SupportedCommandNamesAware) commandHandler).supportedCommandNames()) {
+                    for (String commandName : ((CommandMessageHandler) commandHandler).supportedCommandNames()) {
                         commandBus.subscribe(commandName, commandHandler);
                     }
                 });

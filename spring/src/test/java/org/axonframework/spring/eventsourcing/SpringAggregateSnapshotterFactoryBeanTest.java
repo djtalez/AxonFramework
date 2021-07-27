@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2010-2018. Axon Framework
+ * Copyright (c) 2010-2020. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,14 +16,17 @@
 
 package org.axonframework.spring.eventsourcing;
 
-import org.axonframework.commandhandling.model.RepositoryProvider;
-import org.axonframework.eventsourcing.*;
+import org.axonframework.eventhandling.DomainEventMessage;
+import org.axonframework.eventhandling.GenericDomainEventMessage;
+import org.axonframework.eventsourcing.AbstractAggregateFactory;
+import org.axonframework.eventsourcing.AggregateFactory;
+import org.axonframework.eventsourcing.EventSourcingRepository;
 import org.axonframework.eventsourcing.eventstore.DomainEventStream;
 import org.axonframework.eventsourcing.eventstore.EventStore;
 import org.axonframework.messaging.MetaData;
+import org.axonframework.modelling.command.RepositoryProvider;
 import org.axonframework.spring.config.annotation.StubAggregate;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.*;
 import org.springframework.context.ApplicationContext;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -39,7 +42,7 @@ import static org.mockito.Mockito.*;
  * @author Allard Buijze
  * @author Nakul Mishra
  */
-public class SpringAggregateSnapshotterFactoryBeanTest {
+class SpringAggregateSnapshotterFactoryBeanTest {
 
     private SpringAggregateSnapshotterFactoryBean testSubject;
     private PlatformTransactionManager mockTransactionManager;
@@ -49,8 +52,8 @@ public class SpringAggregateSnapshotterFactoryBeanTest {
     private ApplicationContext mockApplicationContext;
     private Executor executor;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         mockApplicationContext = mock(ApplicationContext.class);
         mockEventStore = mock(EventStore.class);
         mockRepositoryProvider = mock(RepositoryProvider.class);
@@ -82,7 +85,7 @@ public class SpringAggregateSnapshotterFactoryBeanTest {
     }
 
     @Test
-    public void testSnapshotCreated_NoTransaction() throws Exception {
+    void testSnapshotCreatedNoTransaction() {
         SpringAggregateSnapshotter snapshotter = testSubject.getObject();
         snapshotter.scheduleSnapshot(StubAggregate.class, aggregateIdentifier);
 
@@ -91,19 +94,23 @@ public class SpringAggregateSnapshotterFactoryBeanTest {
     }
 
     @Test
-    public void testRetrieveAggregateFactoryFromRepositoryIfNotExplicitlyAvailable() throws Exception {
+    void testRetrieveAggregateFactoryFromRepositoryIfNotExplicitlyAvailable() {
         testSubject.setEventStore(null);
         reset(mockApplicationContext);
         when(mockApplicationContext.getBean(EventStore.class)).thenReturn(mockEventStore);
-        when(mockApplicationContext.getBeansOfType(EventSourcingRepository.class)).thenReturn(
-                Collections.singletonMap("myRepository",
-                                         new EventSourcingRepository<>(StubAggregate.class, mockEventStore, mockRepositoryProvider))
-        );
-        testSnapshotCreated_NoTransaction();
+
+        when(mockApplicationContext.getBeansOfType(EventSourcingRepository.class))
+                .thenReturn(Collections.singletonMap("myRepository",
+                                                     EventSourcingRepository.builder(StubAggregate.class)
+                                                                            .eventStore(mockEventStore)
+                                                                            .repositoryProvider(mockRepositoryProvider)
+                                                                            .build()
+                ));
+        testSnapshotCreatedNoTransaction();
     }
 
     @Test
-    public void testSnapshotCreated_NewlyCreatedTransactionCommitted() throws Exception {
+    void testSnapshotCreatedNewlyCreatedTransactionCommitted() {
         testSubject.setTransactionManager(mockTransactionManager);
         SpringAggregateSnapshotter snapshotter = testSubject.getObject();
         SimpleTransactionStatus newlyCreatedTransaction = new SimpleTransactionStatus(true);
@@ -117,7 +124,7 @@ public class SpringAggregateSnapshotterFactoryBeanTest {
     }
 
     @Test
-    public void testSnapshotCreated_ExistingTransactionNotCommitted() throws Exception {
+    void testSnapshotCreatedExistingTransactionNotCommitted() {
         testSubject.setTransactionManager(mockTransactionManager);
         SpringAggregateSnapshotter snapshotter = testSubject.getObject();
         SimpleTransactionStatus existingTransaction = new SimpleTransactionStatus(false);
@@ -130,7 +137,7 @@ public class SpringAggregateSnapshotterFactoryBeanTest {
     }
 
     @Test
-    public void testSnapshotCreated_ExistingTransactionNotRolledBack() throws Exception {
+    void testSnapshotCreatedExistingTransactionNotRolledBack() {
         testSubject.setTransactionManager(mockTransactionManager);
         SpringAggregateSnapshotter snapshotter = testSubject.getObject();
         SimpleTransactionStatus existingTransaction = new SimpleTransactionStatus(false);
@@ -145,7 +152,7 @@ public class SpringAggregateSnapshotterFactoryBeanTest {
     }
 
     @Test
-    public void testSnapshotCreated_NewTransactionRolledBack() throws Exception {
+    void testSnapshotCreatedNewTransactionRolledBack() {
         testSubject.setTransactionManager(mockTransactionManager);
         SpringAggregateSnapshotter snapshotter = testSubject.getObject();
         SimpleTransactionStatus existingTransaction = new SimpleTransactionStatus(true);
@@ -165,6 +172,7 @@ public class SpringAggregateSnapshotterFactoryBeanTest {
     }
 
     public static class MockExecutor implements Executor {
+
         @Override
         public void execute(Runnable command) {
             command.run();

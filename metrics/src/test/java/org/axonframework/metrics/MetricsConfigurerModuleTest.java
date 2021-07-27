@@ -17,25 +17,23 @@
 package org.axonframework.metrics;
 
 import org.axonframework.config.Configurer;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.*;
 
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.*;
 
-public class MetricsConfigurerModuleTest {
+class MetricsConfigurerModuleTest {
 
     private GlobalMetricRegistry globalMetricRegistry;
     private MetricsConfigurerModule metricsConfigurerModule;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         globalMetricRegistry = mock(GlobalMetricRegistry.class);
         metricsConfigurerModule = new MetricsConfigurerModule(globalMetricRegistry);
     }
 
     @Test
-    public void testConfigureModuleCallsGlobalMetricRegistry() {
+    void testConfigureModuleCallsGlobalMetricRegistry() {
         Configurer configurerMock = mock(Configurer.class);
 
         metricsConfigurerModule.configureModule(configurerMock);

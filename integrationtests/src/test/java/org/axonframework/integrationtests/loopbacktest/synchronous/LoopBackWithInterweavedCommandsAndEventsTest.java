@@ -1,32 +1,49 @@
+/*
+ * Copyright (c) 2010-2020. Axon Framework
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.axonframework.integrationtests.loopbacktest.synchronous;
 
 import org.axonframework.commandhandling.CommandHandler;
+import org.axonframework.commandhandling.CommandMessage;
 import org.axonframework.commandhandling.GenericCommandMessage;
 import org.axonframework.commandhandling.gateway.CommandGateway;
-import org.axonframework.commandhandling.model.*;
 import org.axonframework.config.AggregateConfigurer;
 import org.axonframework.config.Configuration;
 import org.axonframework.config.DefaultConfigurer;
+import org.axonframework.eventhandling.DomainEventMessage;
 import org.axonframework.eventsourcing.AggregateFactory;
-import org.axonframework.eventsourcing.DomainEventMessage;
 import org.axonframework.eventsourcing.EventSourcingHandler;
-import org.axonframework.eventsourcing.SequenceNumber;
 import org.axonframework.eventsourcing.eventstore.inmemory.InMemoryEventStorageEngine;
 import org.axonframework.messaging.Message;
 import org.axonframework.messaging.unitofwork.DefaultUnitOfWork;
 import org.axonframework.messaging.unitofwork.UnitOfWork;
-import org.junit.Before;
-import org.junit.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.axonframework.modelling.command.Aggregate;
+import org.axonframework.modelling.command.AggregateIdentifier;
+import org.axonframework.modelling.command.AggregateNotFoundException;
+import org.axonframework.modelling.command.AggregateRoot;
+import org.axonframework.modelling.command.Repository;
+import org.junit.jupiter.api.*;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.axonframework.commandhandling.model.AggregateLifecycle.apply;
-import static org.junit.Assert.assertEquals;
+import static org.axonframework.modelling.command.AggregateLifecycle.apply;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * @author Gerard de Leeuw
@@ -38,24 +55,28 @@ public class LoopBackWithInterweavedCommandsAndEventsTest {
     private MyCommand command;
     private Configuration configuration;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         configuration = DefaultConfigurer.defaultConfiguration()
-                .configureEmbeddedEventStore(c -> new InMemoryEventStorageEngine())
-                .configureAggregate(AggregateConfigurer.defaultConfiguration(MyAggregate.class)
-                .configureAggregateFactory(c -> new AggregateFactory<MyAggregate>() {
-                    @Override
-                    public MyAggregate createAggregateRoot(String aggregateIdentifier, DomainEventMessage<?> firstEvent) {
-                        return new MyAggregate(aggregateIdentifier);
-                    }
+                                         .configureEmbeddedEventStore(c -> new InMemoryEventStorageEngine())
+                                         .configureAggregate(AggregateConfigurer.defaultConfiguration(MyAggregate.class)
+                                                                                .configureAggregateFactory(c -> new AggregateFactory<MyAggregate>() {
+                                                                                    @Override
+                                                                                    public MyAggregate createAggregateRoot(
+                                                                                            String aggregateIdentifier,
+                                                                                            DomainEventMessage<?> firstEvent) {
+                                                                                        return new MyAggregate(
+                                                                                                aggregateIdentifier);
+                                                                                    }
 
-                    @Override
-                    public Class<MyAggregate> getAggregateType() {
-                        return MyAggregate.class;
-                    }
-                }))
-                .registerCommandHandler(c -> new MyCommandHandler(c.repository(MyAggregate.class), c.commandGateway()))
-                .buildConfiguration();
+                                                                                    @Override
+                                                                                    public Class<MyAggregate> getAggregateType() {
+                                                                                        return MyAggregate.class;
+                                                                                    }
+                                                                                }))
+                                         .registerCommandHandler(c -> new MyCommandHandler(c.repository(MyAggregate.class),
+                                                                                           c.commandGateway()))
+                                         .buildConfiguration();
         configuration.start();
 
         command = new MyCommand("outer", aggregateIdentifier,
@@ -64,18 +85,19 @@ public class LoopBackWithInterweavedCommandsAndEventsTest {
     }
 
     @Test
-    public void orderInCommandHandlerAggregate() {
+    void orderInCommandHandlerAggregate() {
         MyAggregate commandHandlerAggregate = configuration.commandGateway().sendAndWait(command);
 
         assertEquals(expectedDescriptions(command), commandHandlerAggregate.getHandledCommands());
     }
 
     @Test
-    public void orderInEventSourcedAggregate() {
+    void orderInEventSourcedAggregate() {
         Repository<MyAggregate> repository = configuration.repository(MyAggregate.class);
         configuration.commandGateway().sendAndWait(command);
 
-        UnitOfWork unitOfWork = DefaultUnitOfWork.startAndGet(GenericCommandMessage.asCommandMessage("loading"));
+        UnitOfWork<CommandMessage<?>> unitOfWork =
+                DefaultUnitOfWork.startAndGet(GenericCommandMessage.asCommandMessage("loading"));
         MyAggregate loadedAggregate = repository.load(aggregateIdentifier).invoke(Function.identity());
         unitOfWork.commit();
 
@@ -83,15 +105,15 @@ public class LoopBackWithInterweavedCommandsAndEventsTest {
     }
 
     @Test
-    public void orderInEventStore() {
+    void orderInEventStore() {
         configuration.commandGateway().sendAndWait(command);
         assertEquals(expectedDescriptions(command), configuration.eventStore()
-                .readEvents(aggregateIdentifier)
-                .asStream()
-                .map(Message::getPayload)
-                .map(MyEvent.class::cast)
-                .map(MyEvent::getDescription)
-                .collect(Collectors.toList()));
+                                                                 .readEvents(aggregateIdentifier)
+                                                                 .asStream()
+                                                                 .map(Message::getPayload)
+                                                                 .map(MyEvent.class::cast)
+                                                                 .map(MyEvent::getDescription)
+                                                                 .collect(Collectors.toList()));
     }
 
     private List<String> expectedDescriptions(MyCommand command) {
@@ -111,7 +133,6 @@ public class LoopBackWithInterweavedCommandsAndEventsTest {
     @AggregateRoot
     public static class MyAggregate {
 
-        private final Logger logger = LoggerFactory.getLogger(getClass());
         private final List<String> handledCommands;
         @AggregateIdentifier
         private String aggregateIdentifier;
@@ -130,13 +151,8 @@ public class LoopBackWithInterweavedCommandsAndEventsTest {
         }
 
         @EventSourcingHandler
-        public void handle(MyEvent event, @SequenceNumber long sequenceNumber) {
+        public void handle(MyEvent event) {
             this.aggregateIdentifier = event.getAggregateIdentifier();
-            logger.info(String.format(
-                    "Event sourcing event: aggregateIdentifier = %s, sequenceNumber = %d, payload = %s",
-                    aggregateIdentifier,
-                    sequenceNumber,
-                    event));
             handledCommands.add(event.getDescription());
         }
 

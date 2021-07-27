@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,22 +17,22 @@
 package org.axonframework.test.aggregate;
 
 import org.axonframework.commandhandling.CommandHandler;
-import org.axonframework.commandhandling.model.AggregateIdentifier;
-import org.axonframework.commandhandling.model.Repository;
-import org.axonframework.commandhandling.model.RepositoryProvider;
-import org.axonframework.commandhandling.model.inspection.AggregateModel;
-import org.axonframework.commandhandling.model.inspection.AnnotatedAggregateMetaModelFactory;
+import org.axonframework.modelling.command.AggregateIdentifier;
+import org.axonframework.modelling.command.Repository;
+import org.axonframework.modelling.command.RepositoryProvider;
+import org.axonframework.modelling.command.inspection.AggregateModel;
+import org.axonframework.modelling.command.inspection.AnnotatedAggregateMetaModelFactory;
 import org.axonframework.eventsourcing.EventSourcedAggregate;
 import org.axonframework.eventsourcing.EventSourcingHandler;
-import org.junit.*;
-import org.junit.runner.*;
-import org.mockito.junit.*;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Objects;
 import java.util.concurrent.Callable;
 
-import static org.axonframework.commandhandling.model.AggregateLifecycle.apply;
-import static org.axonframework.commandhandling.model.AggregateLifecycle.createNew;
+import static org.axonframework.modelling.command.AggregateLifecycle.apply;
+import static org.axonframework.modelling.command.AggregateLifecycle.createNew;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -41,18 +41,18 @@ import static org.mockito.Mockito.*;
  *
  * @author Milan Savic
  */
-@RunWith(MockitoJUnitRunner.class)
-public class FixtureTest_SpawningNewAggregate {
+@ExtendWith(MockitoExtension.class)
+class FixtureTest_SpawningNewAggregate {
 
     private FixtureConfiguration<Aggregate1> fixture;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         fixture = new AggregateTestFixture<>(Aggregate1.class);
     }
 
     @Test
-    public void testFixtureWithoutRepositoryProviderInjected() {
+    void testFixtureWithoutRepositoryProviderInjected() {
         fixture.givenNoPriorActivity()
                .when(new CreateAggregate1Command("id", "aggregate2Id"))
                .expectEvents(new Aggregate2CreatedEvent("aggregate2Id"), new Aggregate1CreatedEvent("id"))
@@ -61,7 +61,7 @@ public class FixtureTest_SpawningNewAggregate {
 
     @SuppressWarnings("unchecked")
     @Test
-    public void testFixtureWithRepositoryProviderInjected() throws Exception {
+    void testFixtureWithRepositoryProviderInjected() throws Exception {
         RepositoryProvider repositoryProvider = mock(RepositoryProvider.class);
         Repository<Aggregate2> aggregate2Repository = mock(Repository.class);
         AggregateModel<Aggregate2> aggregate2Model = AnnotatedAggregateMetaModelFactory
@@ -101,7 +101,7 @@ public class FixtureTest_SpawningNewAggregate {
             return id;
         }
 
-        public String getAggregate2Id() {
+        String getAggregate2Id() {
             return aggregate2Id;
         }
     }
@@ -197,7 +197,7 @@ public class FixtureTest_SpawningNewAggregate {
         public Aggregate2() {
         }
 
-        public Aggregate2(String id) {
+        Aggregate2(String id) {
             apply(new Aggregate2CreatedEvent(id));
         }
 

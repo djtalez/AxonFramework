@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2010-2016. Axon Framework
+ * Copyright (c) 2010-2021. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,12 +17,14 @@
 package org.axonframework.test.saga;
 
 import org.axonframework.commandhandling.CommandMessage;
+import org.axonframework.common.Assert;
 import org.axonframework.deadline.DeadlineMessage;
 import org.axonframework.eventhandling.EventBus;
 import org.axonframework.eventhandling.EventMessage;
-import org.axonframework.eventhandling.saga.repository.inmemory.InMemorySagaStore;
+import org.axonframework.modelling.saga.repository.inmemory.InMemorySagaStore;
 import org.axonframework.test.deadline.DeadlineManagerValidator;
 import org.axonframework.test.deadline.StubDeadlineManager;
+import org.axonframework.test.eventscheduler.EventSchedulerValidator;
 import org.axonframework.test.eventscheduler.StubEventScheduler;
 import org.axonframework.test.matchers.FieldFilter;
 import org.axonframework.test.matchers.Matchers;
@@ -32,9 +34,9 @@ import org.hamcrest.Matcher;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
-import static org.axonframework.test.matchers.Matchers.equalTo;
-import static org.axonframework.test.matchers.Matchers.messageWithPayload;
+import static org.axonframework.test.matchers.Matchers.*;
 import static org.hamcrest.CoreMatchers.any;
 
 /**
@@ -51,6 +53,7 @@ public class FixtureExecutionResultImpl<T> implements FixtureExecutionResult {
     private final DeadlineManagerValidator deadlineManagerValidator;
     private final CommandValidator commandValidator;
     private final FieldFilter fieldFilter;
+    private final List<Runnable> onStartRecordingCallbacks;
 
     /**
      * Initializes an instance and make it monitor the given infrastructure classes.
@@ -72,6 +75,21 @@ public class FixtureExecutionResultImpl<T> implements FixtureExecutionResult {
         eventValidator = new EventValidator(eventBus, fieldFilter);
         eventSchedulerValidator = new EventSchedulerValidator(eventScheduler);
         deadlineManagerValidator = new DeadlineManagerValidator(deadlineManager, fieldFilter);
+        onStartRecordingCallbacks = new CopyOnWriteArrayList<>();
+    }
+
+    /**
+     * Registers a callback to be invoked when the fixture execution starts recording. This happens right before
+     * invocation of the 'when' step (stimulus) of the fixture.
+     * <p/>
+     * Use this to manage Saga dependencies which are not an Axon first class citizen, but do require monitoring of
+     * their interactions. For example, register the callback to set a mock in recording mode.
+     *
+     * @param onStartRecordingCallback callback to invoke
+     */
+    public void registerStartRecordingCallback(Runnable onStartRecordingCallback) {
+        Assert.notNull(onStartRecordingCallback, () -> "onStartRecordingCallback may not be null");
+        onStartRecordingCallbacks.add(onStartRecordingCallback);
     }
 
     /**
@@ -80,6 +98,7 @@ public class FixtureExecutionResultImpl<T> implements FixtureExecutionResult {
     public void startRecording() {
         eventValidator.startRecording();
         commandValidator.startRecording();
+        onStartRecordingCallbacks.forEach(Runnable::run);
     }
 
     @Override
@@ -102,7 +121,8 @@ public class FixtureExecutionResultImpl<T> implements FixtureExecutionResult {
 
 
     @Override
-    public FixtureExecutionResult expectScheduledEventMatching(Duration duration, Matcher<? super EventMessage<?>> matcher) {
+    public FixtureExecutionResult expectScheduledEventMatching(Duration duration,
+                                                               Matcher<? super EventMessage<?>> matcher) {
         eventSchedulerValidator.assertScheduledEventMatching(duration, matcher);
         return this;
     }
@@ -135,7 +155,16 @@ public class FixtureExecutionResultImpl<T> implements FixtureExecutionResult {
     }
 
     @Override
-    public FixtureExecutionResult expectScheduledEventMatching(Instant scheduledTime, Matcher<? super EventMessage<?>> matcher) {
+    public FixtureExecutionResult expectScheduledDeadlineWithName(Duration duration, String deadlineName) {
+        return expectScheduledDeadlineMatching(
+                duration,
+                matches(deadlineMessage -> deadlineMessage.getDeadlineName().equals(deadlineName))
+        );
+    }
+
+    @Override
+    public FixtureExecutionResult expectScheduledEventMatching(Instant scheduledTime,
+                                                               Matcher<? super EventMessage<?>> matcher) {
         eventSchedulerValidator.assertScheduledEventMatching(scheduledTime, matcher);
         return this;
     }
@@ -168,13 +197,22 @@ public class FixtureExecutionResultImpl<T> implements FixtureExecutionResult {
     }
 
     @Override
+    public FixtureExecutionResult expectScheduledDeadlineWithName(Instant scheduledTime, String deadlineName) {
+        return expectScheduledDeadlineMatching(
+                scheduledTime,
+                matches(deadlineMessage -> deadlineMessage.getDeadlineName().equals(deadlineName))
+        );
+    }
+
+    @Override
     public FixtureExecutionResult expectDispatchedCommands(Object... expected) {
         commandValidator.assertDispatchedEqualTo(expected);
         return this;
     }
 
     @Override
-    public FixtureExecutionResult expectDispatchedCommandsMatching(Matcher<? extends List<? super CommandMessage<?>>> matcher) {
+    public FixtureExecutionResult expectDispatchedCommandsMatching(
+            Matcher<? extends List<? super CommandMessage<?>>> matcher) {
         commandValidator.assertDispatchedMatching(matcher);
         return this;
     }
@@ -192,21 +230,129 @@ public class FixtureExecutionResultImpl<T> implements FixtureExecutionResult {
     }
 
     @Override
+    public FixtureExecutionResult expectNoScheduledEventMatching(Duration durationToScheduledTime,
+                                                                 Matcher<? super EventMessage<?>> matcher) {
+        eventSchedulerValidator.assertNoScheduledEventMatching(durationToScheduledTime, matcher);
+        return this;
+    }
+
+    @Override
+    public FixtureExecutionResult expectNoScheduledEvent(Duration durationToScheduledTime, Object event) {
+        return expectNoScheduledEventMatching(durationToScheduledTime, messageWithPayload(equalTo(event, fieldFilter)));
+    }
+
+    @Override
+    public FixtureExecutionResult expectNoScheduledEventOfType(Duration durationToScheduledTime, Class<?> eventType) {
+        return expectNoScheduledEventMatching(durationToScheduledTime, messageWithPayload(any(eventType)));
+    }
+
+    @Override
+    public FixtureExecutionResult expectNoScheduledEventMatching(Instant scheduledTime,
+                                                                 Matcher<? super EventMessage<?>> matcher) {
+        eventSchedulerValidator.assertNoScheduledEventMatching(scheduledTime, matcher);
+        return this;
+    }
+
+    @Override
+    public FixtureExecutionResult expectNoScheduledEvent(Instant scheduledTime, Object event) {
+        return expectNoScheduledEventMatching(scheduledTime, messageWithPayload(equalTo(event, fieldFilter)));
+    }
+
+    @Override
+    public FixtureExecutionResult expectNoScheduledEventOfType(Instant scheduledTime, Class<?> eventType) {
+        return expectNoScheduledEventMatching(scheduledTime, messageWithPayload(any(eventType)));
+    }
+
+    @Override
     public FixtureExecutionResult expectNoScheduledDeadlines() {
         deadlineManagerValidator.assertNoScheduledDeadlines();
         return this;
     }
 
     @Override
-    public FixtureExecutionResult expectPublishedEventsMatching(Matcher<? extends List<? super EventMessage<?>>> matcher) {
+    public FixtureExecutionResult expectNoScheduledDeadlineMatching(Matcher<? super DeadlineMessage<?>> matcher) {
+        deadlineManagerValidator.assertNoScheduledDeadlineMatching(matcher);
+        return this;
+    }
+
+    @Override
+    public FixtureExecutionResult expectNoScheduledDeadlineMatching(Duration durationToScheduledTime,
+                                                                    Matcher<? super DeadlineMessage<?>> matcher) {
+        Instant scheduledTime = deadlineManagerValidator.currentDateTime().plus(durationToScheduledTime);
+        return expectNoScheduledDeadlineMatching(scheduledTime, matcher);
+    }
+
+    @Override
+    public FixtureExecutionResult expectNoScheduledDeadline(Duration durationToScheduledTime, Object deadline) {
+        return expectNoScheduledDeadlineMatching(
+                durationToScheduledTime, messageWithPayload(equalTo(deadline, fieldFilter))
+        );
+    }
+
+    @Override
+    public FixtureExecutionResult expectNoScheduledDeadlineOfType(Duration durationToScheduledTime,
+                                                                  Class<?> deadlineType) {
+        return expectNoScheduledDeadlineMatching(durationToScheduledTime, messageWithPayload(any(deadlineType)));
+    }
+
+    @Override
+    public FixtureExecutionResult expectNoScheduledDeadlineWithName(Duration durationToScheduledTime,
+                                                                    String deadlineName) {
+        return expectNoScheduledDeadlineMatching(
+                durationToScheduledTime,
+                matches(deadlineMessage -> deadlineMessage.getDeadlineName().equals(deadlineName))
+        );
+    }
+
+    @Override
+    public FixtureExecutionResult expectNoScheduledDeadlineMatching(Instant scheduledTime,
+                                                                    Matcher<? super DeadlineMessage<?>> matcher) {
+        return expectNoScheduledDeadlineMatching(matches(
+                deadlineMessage -> deadlineMessage.getTimestamp().equals(scheduledTime)
+                        && matcher.matches(deadlineMessage)
+        ));
+    }
+
+    @Override
+    public FixtureExecutionResult expectNoScheduledDeadline(Instant scheduledTime, Object deadline) {
+        return expectNoScheduledDeadlineMatching(
+                scheduledTime,
+                messageWithPayload(equalTo(deadline, fieldFilter))
+        );
+    }
+
+    @Override
+    public FixtureExecutionResult expectNoScheduledDeadlineOfType(Instant scheduledTime, Class<?> deadlineType) {
+        return expectNoScheduledDeadlineMatching(scheduledTime, messageWithPayload(any(deadlineType)));
+    }
+
+    @Override
+    public FixtureExecutionResult expectNoScheduledDeadlineWithName(Instant scheduledTime, String deadlineName) {
+        return expectNoScheduledDeadlineMatching(
+                scheduledTime,
+                matches(deadlineMessage -> deadlineMessage.getDeadlineName().equals(deadlineName))
+        );
+    }
+
+    @Override
+    public FixtureExecutionResult expectPublishedEventsMatching(
+            Matcher<? extends List<? super EventMessage<?>>> matcher) {
         eventValidator.assertPublishedEventsMatching(matcher);
         return this;
     }
 
     @Override
     public FixtureExecutionResult expectDeadlinesMetMatching(
-            Matcher<? extends List<? super DeadlineMessage<?>>> matcher) {
-        deadlineManagerValidator.assertDeadlinesMetMatching(matcher);
+            Matcher<? extends List<? super DeadlineMessage<?>>> matcher
+    ) {
+        return expectTriggeredDeadlinesMatching(matcher);
+    }
+
+    @Override
+    public FixtureExecutionResult expectTriggeredDeadlinesMatching(
+            Matcher<? extends List<? super DeadlineMessage<?>>> matcher
+    ) {
+        deadlineManagerValidator.assertTriggeredDeadlinesMatching(matcher);
         return this;
     }
 
@@ -218,7 +364,24 @@ public class FixtureExecutionResultImpl<T> implements FixtureExecutionResult {
 
     @Override
     public FixtureExecutionResult expectDeadlinesMet(Object... expected) {
-        deadlineManagerValidator.assertDeadlinesMet(expected);
+        return expectTriggeredDeadlines(expected);
+    }
+
+    @Override
+    public FixtureExecutionResult expectTriggeredDeadlines(Object... expected) {
+        deadlineManagerValidator.assertTriggeredDeadlines(expected);
+        return this;
+    }
+
+    @Override
+    public FixtureExecutionResult expectTriggeredDeadlinesWithName(String... expectedDeadlineNames) {
+        deadlineManagerValidator.assertTriggeredDeadlinesWithName(expectedDeadlineNames);
+        return this;
+    }
+
+    @Override
+    public FixtureExecutionResult expectTriggeredDeadlinesOfType(Class<?>... expectedDeadlineTypes) {
+        deadlineManagerValidator.assertTriggeredDeadlinesOfType(expectedDeadlineTypes);
         return this;
     }
 }

@@ -1,10 +1,11 @@
 /*
- * Copyright (c) 2010-2017. Axon Framework
+ * Copyright (c) 2010-2020. Axon Framework
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,9 +16,10 @@
 
 package org.axonframework.spring.config;
 
-import org.axonframework.config.EventHandlingConfiguration;
+import org.axonframework.config.EventProcessingConfigurer;
+import org.axonframework.config.EventProcessingModule;
+import org.axonframework.config.ModuleConfiguration;
 import org.springframework.beans.factory.InitializingBean;
-import org.springframework.context.SmartLifecycle;
 import org.springframework.core.annotation.AnnotationAwareOrderComparator;
 
 import java.util.List;
@@ -25,34 +27,37 @@ import java.util.List;
 /**
  * Spring Bean that registers Event Handler beans with the EventHandlingConfiguration.
  * <p>
- * To customize this behavior, define a Bean of type {@link EventHandlingConfiguration} in the application context:
+ * To customize this behavior, define a Bean of type {@link EventProcessingModule} in the application context:
  * <pre>
  *     &#64;Bean
- *     public EventHandlingConfiguration eventHandlerConfiguration() {
- *         return new EventHandlingConfiguration();
+ *     public EventProcessingModule eventProcessing() {
+ *         return new EventProcessingModule();
  *     }
  * </pre>
+ *
+ * @author Allard Buijze
+ * @since 3.0
  */
-public class EventHandlerRegistrar implements InitializingBean, SmartLifecycle {
+public class EventHandlerRegistrar implements InitializingBean {
 
-    private static final int EARLY_PHASE = Integer.MIN_VALUE + 1000;
     private final AxonConfiguration axonConfiguration;
-    private final EventHandlingConfiguration delegate;
-    private volatile boolean running = false;
+    private final EventProcessingConfigurer eventProcessingConfigurer;
+    private final ModuleConfiguration eventProcessingConfiguration;
     private volatile boolean initialized;
 
     /**
-     * Initialize the registrar to register beans discovered with the given {@code eventHandlingConfiguration}.
-     * The registrar will also initialize the EventHandlerConfiguration using the given {@code axonConfiguration}
-     * and start it.
+     * Initialize the registrar to register beans discovered with the given {@code eventProcessing}. The registrar will
+     * also initialize the EventHandlerConfiguration using the given {@code axonConfiguration} and start it.
      *
-     * @param axonConfiguration          The main Axon Configuration instance
-     * @param eventHandlingConfiguration The main Axon Configuration
+     * @param axonConfiguration         The main Axon Configuration instance
+     * @param eventProcessingConfigurer The main Axon Configuration
      */
     public EventHandlerRegistrar(AxonConfiguration axonConfiguration,
-                                 EventHandlingConfiguration eventHandlingConfiguration) {
+                                 ModuleConfiguration eventProcessingConfiguration,
+                                 EventProcessingConfigurer eventProcessingConfigurer) {
         this.axonConfiguration = axonConfiguration;
-        this.delegate = eventHandlingConfiguration;
+        this.eventProcessingConfiguration = eventProcessingConfiguration;
+        this.eventProcessingConfigurer = eventProcessingConfigurer;
     }
 
     /**
@@ -63,50 +68,14 @@ public class EventHandlerRegistrar implements InitializingBean, SmartLifecycle {
      */
     public void setEventHandlers(List<Object> beans) {
         AnnotationAwareOrderComparator.sort(beans);
-        beans.forEach(b -> delegate.registerEventHandler(c -> b));
-    }
-
-    @Override
-    public boolean isAutoStartup() {
-        return true;
-    }
-
-    @Override
-    public void stop(Runnable callback) {
-        stop();
-        callback.run();
-    }
-
-    @Override
-    public void start() {
-        delegate.start();
-        running = true;
-    }
-
-    @Override
-    public void stop() {
-        delegate.shutdown();
-        running = false;
-    }
-
-    @Override
-    public boolean isRunning() {
-        return running;
-    }
-
-    @Override
-    public int getPhase() {
-        return EARLY_PHASE;
+        beans.forEach(b -> eventProcessingConfigurer.registerEventHandler(c -> b));
     }
 
     @Override
     public void afterPropertiesSet() {
         if (!initialized) {
             initialized = true;
-            delegate.initialize(axonConfiguration);
-            // since the configuration is already initialized in this phase, we need to tell
-            // eventProcessingConfiguration to pick up our event handlers
-            axonConfiguration.eventProcessingConfiguration().initialize(axonConfiguration);
+            eventProcessingConfiguration.initialize(axonConfiguration);
         }
     }
 }

@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2010-2017. Axon Framework
+ * Copyright (c) 2010-2018. Axon Framework
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,42 +16,44 @@
 
 package org.axonframework.test.aggregate;
 
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import static org.axonframework.commandhandling.model.AggregateLifecycle.apply;
-import static org.axonframework.commandhandling.model.AggregateLifecycle.markDeleted;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.axonframework.modelling.command.AggregateLifecycle.apply;
+import static org.axonframework.modelling.command.AggregateLifecycle.markDeleted;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-public class StubAggregateLifecycleTest {
+class StubAggregateLifecycleTest {
     private StubAggregateLifecycle testSubject;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         testSubject = new StubAggregateLifecycle();
     }
 
-    @After
-    public void tearDown() {
+    @AfterEach
+    void tearDown() {
         testSubject.close();
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testLifecycleIsNotRegisteredAutomatically() {
-        apply("test");
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testApplyingEventsAfterDeactivationFails() {
-        testSubject.activate();
-        testSubject.close();
-        apply("test");
     }
 
     @Test
-    public void testAppliedEventsArePassedToActiveLifecycle() {
+    void testLifecycleIsNotRegisteredAutomatically() {
+        assertThrows(IllegalStateException.class, () -> apply("test"));
+    }
+
+    @Test
+    void testApplyingEventsAfterDeactivationFails() {
+        testSubject.activate();
+        testSubject.close();
+
+        assertThrows(IllegalStateException.class, () -> apply("test"));
+    }
+
+    @Test
+    void testAppliedEventsArePassedToActiveLifecycle() {
         testSubject.activate();
         apply("test");
 
@@ -61,7 +63,7 @@ public class StubAggregateLifecycleTest {
     }
 
     @Test
-    public void testMarkDeletedIsRegisteredWithActiveLifecycle() {
+    void testMarkDeletedIsRegisteredWithActiveLifecycle() {
         testSubject.activate();
         markDeleted();
 

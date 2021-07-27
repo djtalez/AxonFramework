@@ -1,29 +1,39 @@
+/*
+ * Copyright (c) 2010-2020. Axon Framework
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.axonframework.metrics;
 
 import com.codahale.metrics.Metric;
 import com.codahale.metrics.MetricSet;
-import org.apache.log4j.Appender;
-import org.apache.log4j.Logger;
 import org.axonframework.commandhandling.CommandMessage;
 import org.axonframework.common.ReflectionUtils;
 import org.axonframework.messaging.Message;
 import org.axonframework.monitoring.MessageMonitor;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.*;
+import org.mockito.junit.jupiter.*;
 
 import java.lang.reflect.Field;
 import java.util.Map;
 
 import static org.axonframework.commandhandling.GenericCommandMessage.asCommandMessage;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import static org.mockito.Mockito.mock;
+import static org.junit.jupiter.api.Assertions.*;
 
-@RunWith(MockitoJUnitRunner.class)
-public class PayloadTypeMessageMonitorWrapperTest<T extends MessageMonitor<Message<?>> & MetricSet> {
+@ExtendWith(MockitoExtension.class)
+class PayloadTypeMessageMonitorWrapperTest<T extends MessageMonitor<Message<?>> & MetricSet> {
 
     private static final CommandMessage<Object> STRING_MESSAGE = asCommandMessage("stringCommand");
     private static final CommandMessage<Object> INTEGER_MESSAGE = asCommandMessage(1);
@@ -32,24 +42,14 @@ public class PayloadTypeMessageMonitorWrapperTest<T extends MessageMonitor<Messa
 
     private Class<CapacityMonitor> expectedMonitorClass;
 
-    private final Appender appender = mock(Appender.class);
-    private final Logger logger = Logger.getRootLogger();
-
-    @Before
-    public void setUp() {
-        logger.addAppender(appender);
-
+    @BeforeEach
+    void setUp() {
         expectedMonitorClass = CapacityMonitor.class;
         testSubject = new PayloadTypeMessageMonitorWrapper<>(CapacityMonitor::new);
     }
 
-    @After
-    public void tearDown() {
-        logger.removeAppender(appender);
-    }
-
     @Test
-    public void testInstantiateMessageMonitorOfTypeMonitorOnMessageIngested() throws Exception {
+    void testInstantiateMessageMonitorOfTypeMonitorOnMessageIngested() throws Exception {
         Field payloadTypeMonitorsField = testSubject.getClass().getDeclaredField("payloadTypeMonitors");
         payloadTypeMonitorsField.setAccessible(true);
 
@@ -58,18 +58,18 @@ public class PayloadTypeMessageMonitorWrapperTest<T extends MessageMonitor<Messa
         testSubject.onMessageIngested(STRING_MESSAGE);
 
         Map<String, T> payloadTypeMonitors = ReflectionUtils.getFieldValue(payloadTypeMonitorsField, testSubject);
-        assertTrue(payloadTypeMonitors.size() == 1);
+        assertEquals(1, payloadTypeMonitors.size());
         MessageMonitor<Message<?>> messageMessageMonitor = payloadTypeMonitors.get(expectedMonitorName);
         assertNotNull(messageMessageMonitor);
         assertTrue(expectedMonitorClass.isInstance(messageMessageMonitor));
 
         Map<String, Metric> resultMetrics = testSubject.getMetrics();
-        assertTrue(resultMetrics.size() == 1);
+        assertEquals(1, resultMetrics.size());
         assertNotNull(resultMetrics.get(expectedMonitorName));
     }
 
     @Test
-    public void testInstantiatesOneMessageMonitorPerIngestedPayloadType() throws Exception {
+    void testInstantiatesOneMessageMonitorPerIngestedPayloadType() throws Exception {
         Field payloadTypeMonitorsField = testSubject.getClass().getDeclaredField("payloadTypeMonitors");
         payloadTypeMonitorsField.setAccessible(true);
 
@@ -81,7 +81,7 @@ public class PayloadTypeMessageMonitorWrapperTest<T extends MessageMonitor<Messa
         testSubject.onMessageIngested(INTEGER_MESSAGE); // Second unique payload type
 
         Map<String, T> payloadTypeMonitors = ReflectionUtils.getFieldValue(payloadTypeMonitorsField, testSubject);
-        assertTrue(payloadTypeMonitors.size() == 2);
+        assertEquals(2, payloadTypeMonitors.size());
 
         MessageMonitor<Message<?>> messageMessageMonitor = payloadTypeMonitors.get(expectedStringMonitorName);
         assertNotNull(messageMessageMonitor);
@@ -92,13 +92,13 @@ public class PayloadTypeMessageMonitorWrapperTest<T extends MessageMonitor<Messa
         assertTrue(expectedMonitorClass.isInstance(messageMessageMonitor));
 
         Map<String, Metric> resultMetrics = testSubject.getMetrics();
-        assertTrue(resultMetrics.size() == 2);
+        assertEquals(2, resultMetrics.size());
         assertNotNull(resultMetrics.get(expectedStringMonitorName));
         assertNotNull(resultMetrics.get(expectedStringMonitorName));
     }
 
     @Test
-    public void testMonitorNameFollowsGivenMonitorNameBuilderSpecifics() {
+    void testMonitorNameFollowsGivenMonitorNameBuilderSpecifics() {
         String testPrefix = "additional-monitor-name.";
         PayloadTypeMessageMonitorWrapper<CapacityMonitor> testSubject = new PayloadTypeMessageMonitorWrapper<>(
                 CapacityMonitor::new, payloadType -> testPrefix + payloadType.getName());
@@ -108,8 +108,7 @@ public class PayloadTypeMessageMonitorWrapperTest<T extends MessageMonitor<Messa
         testSubject.onMessageIngested(STRING_MESSAGE);
 
         Map<String, Metric> resultMetrics = testSubject.getMetrics();
-        assertTrue(resultMetrics.size() == 1);
+        assertEquals(1, resultMetrics.size());
         assertNotNull(resultMetrics.get(expectedMonitorName));
     }
-
 }

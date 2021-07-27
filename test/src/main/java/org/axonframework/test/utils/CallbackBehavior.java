@@ -33,9 +33,9 @@ public interface CallbackBehavior {
      *
      * @param commandPayload  The payload of the Command Message
      * @param commandMetaData The MetaData of the CommandMessage
-     * @return any return value to pass to the callback's onSuccess method.
+     * @return any return value to pass to the callback's onResult method.
      *
      * @throws Exception If the onFailure method of the callback must be invoked
      */
-    Object handle(Object commandPayload, MetaData commandMetaData);
+    Object handle(Object commandPayload, MetaData commandMetaData) throws Exception;
 }
